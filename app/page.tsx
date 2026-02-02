@@ -2,22 +2,40 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
+import { Plus, Save, X } from 'lucide-react';
 import { 
-  Wallet, TrendingUp, TrendingDown, Plus, Save, 
-  Target, Zap, Landmark, PiggyBank, CreditCard 
-} from 'lucide-react';
-import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend 
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, 
+  Legend 
 } from 'recharts';
 
 export default function Dashboard() {
   const [transactions, setTransactions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
   
-  // Categorías basadas en tu imagen
-  const CATEGORIES = ['Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
+  // Colores exactos de la imagen
+  const THEME = {
+    bg: '#0d1117',        // Fondo principal muy oscuro
+    card: '#161b22',      // Fondo de tarjetas
+    text: '#ffffff',
+    textDim: '#8b949e',
+    variable: '#f43f5e',  // Rosa (Variable)
+    bills: '#fbbf24',     // Amarillo (Bills)
+    debt: '#3b82f6',      // Azul (Debt)
+    investments: '#8b5cf6', // Morado (Investments)
+    savings: '#10b981',   // Verde (Savings)
+  };
+
+  const CATEGORIES = ['Variable', 'Bills', 'Debt', 'Investments', 'Savings'];
   
+  // Presupuestos "Goal" simulados para que se vea como la foto
+  const BUDGETS: any = { 
+    'Variable': 2420, 
+    'Bills': 1805, 
+    'Debt': 1890, 
+    'Investments': 425, 
+    'Savings': 600 
+  };
+
   const [newItem, setNewItem] = useState({ 
     name: '', amount: '', type: 'expense', category: 'Variable' 
   });
@@ -32,7 +50,6 @@ export default function Dashboard() {
       .select('*')
       .order('id', { ascending: false });
     if (data) setTransactions(data);
-    setLoading(false);
   }
 
   async function handleAdd() {
@@ -44,214 +61,304 @@ export default function Dashboard() {
       category: newItem.category 
     }]);
     setNewItem({ name: '', amount: '', type: 'expense', category: 'Variable' });
+    setShowForm(false);
     fetchTransactions();
   }
 
-  // --- CÁLCULOS MATEMÁTICOS ---
+  // --- CÁLCULOS ---
   const income = transactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
   const totalExpenses = transactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const netIncome = income - totalExpenses;
 
-  // Agrupar gastos por categoría para los gráficos
-  const expensesByCategory = CATEGORIES.map(cat => {
-    const total = transactions
+  // Datos por categoría
+  const categoryData = CATEGORIES.map(cat => {
+    const value = transactions
       .filter(t => t.type === 'expense' && t.category === cat)
       .reduce((acc, t) => acc + t.amount, 0);
-    return { name: cat, value: total };
+    return { name: cat, value };
   });
 
-  // Colores para el gráfico circular (Neon Style)
-  const COLORS = ['#f43f5e', '#fbbf24', '#3b82f6', '#8b5cf6', '#10b981'];
+  // Datos para el gráfico Donut (solo gastos > 0)
+  const donutData = categoryData.filter(c => c.value > 0);
+  
+  // Colores mapeados para el gráfico
+  const COLORS = [THEME.variable, THEME.bills, THEME.debt, THEME.investments, THEME.savings];
 
   return (
-    <div className="min-h-screen bg-[#0f172a] text-slate-200 p-4 font-sans">
+    <div className="min-h-screen p-4 md:p-6 font-sans text-white" style={{ backgroundColor: THEME.bg }}>
       
-      {/* HEADER TIPO DASHBOARD */}
-      <header className="flex justify-between items-center mb-8 bg-[#1e293b] p-4 rounded-xl border border-slate-700 shadow-lg">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Dashboard Financiero</h1>
-          <p className="text-emerald-400 text-sm">Septiembre 2026</p>
-        </div>
-        <div className="text-right">
-           <p className="text-xs text-slate-400">Saldo Neto Disponible</p>
-           <h2 className={`text-3xl font-bold ${netIncome >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-             ${netIncome.toFixed(2)}
-           </h2>
-        </div>
-      </header>
+      {/* Botón flotante para añadir datos (para no ensuciar el diseño) */}
+      <button 
+        onClick={() => setShowForm(true)}
+        className="fixed bottom-8 right-8 z-50 bg-emerald-500 hover:bg-emerald-400 text-black font-bold p-4 rounded-full shadow-2xl transition-all transform hover:scale-110"
+      >
+        <Plus size={24} />
+      </button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* MODAL DE FORMULARIO */}
+      {showForm && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-xl">Añadir Movimiento</h3>
+              <button onClick={() => setShowForm(false)}><X className="text-slate-400 hover:text-white"/></button>
+            </div>
+            <div className="space-y-4">
+              <input 
+                className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" 
+                placeholder="Concepto" 
+                value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}
+              />
+              <input 
+                type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" 
+                placeholder="Cantidad (0.00)" 
+                value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <select 
+                  className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white"
+                  value={newItem.type} onChange={e => setNewItem({...newItem, type: e.target.value})}
+                >
+                  <option value="expense">Gasto</option>
+                  <option value="income">Ingreso</option>
+                </select>
+                <select 
+                  className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white"
+                  value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}
+                >
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <button onClick={handleAdd} className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3 rounded-lg flex justify-center gap-2">
+                <Save size={20}/> Guardar Transacción
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- GRID PRINCIPAL (LAYOUT IDÉNTICO A LA FOTO) --- */}
+      <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-4">
         
-        {/* --- COLUMNA IZQUIERDA (RESUMEN) --- */}
-        <div className="lg:col-span-3 space-y-6">
-            {/* Tarjeta de Ingresos */}
-            <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 border-t-4 border-t-emerald-500">
-                <p className="text-slate-400 mb-1">Total Ingresos</p>
-                <h3 className="text-2xl font-bold text-white">${income.toFixed(2)}</h3>
-                <div className="mt-4 text-xs text-slate-500 flex justify-between">
-                    <span>Presupuesto: $7,200</span>
-                    <span className="text-emerald-400">+{((income/7200)*100).toFixed(0)}%</span>
-                </div>
-                {/* Barra de progreso visual */}
-                <div className="w-full bg-slate-700 h-2 rounded-full mt-2">
-                    <div className="bg-emerald-500 h-2 rounded-full" style={{width: `${Math.min((income/7200)*100, 100)}%`}}></div>
-                </div>
-            </div>
+        {/* 1. COLUMNA IZQUIERDA (FECHA Y SALDOS) */}
+        <div className="md:col-span-3 space-y-4">
+          {/* September Header */}
+          <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
+             <h1 className="text-3xl font-light text-white">Septiembre</h1>
+             <p className="text-slate-500 text-xs uppercase tracking-widest mt-1">- Monthly Dashboard -</p>
+          </div>
+          
+          {/* Starting Balance */}
+          <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+             <span className="text-slate-400 text-xs">Saldo Inicial</span>
+             <span className="text-white font-mono">$2,001.67</span>
+          </div>
+          
+          {/* Projected Remaining */}
+          <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
+             <p className="text-slate-400 text-xs mb-2">Saldo Proyectado</p>
+             <h2 className="text-2xl font-bold text-white">${(2001.67 + netIncome).toFixed(2)}</h2>
+          </div>
 
-            {/* Tarjeta de Gastos */}
-            <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 border-t-4 border-t-rose-500">
-                <p className="text-slate-400 mb-1">Total Gastos</p>
-                <h3 className="text-2xl font-bold text-white">${totalExpenses.toFixed(2)}</h3>
-                <div className="mt-4 text-xs text-slate-500 flex justify-between">
-                    <span>Límite: $5,000</span>
-                    <span className="text-rose-400">{((totalExpenses/5000)*100).toFixed(0)}%</span>
-                </div>
-                <div className="w-full bg-slate-700 h-2 rounded-full mt-2">
-                    <div className="bg-rose-500 h-2 rounded-full" style={{width: `${Math.min((totalExpenses/5000)*100, 100)}%`}}></div>
-                </div>
-            </div>
-
-            {/* Formulario Rápido (Integrado en el lateral) */}
-            <div className="bg-[#1e293b] p-5 rounded-xl border border-slate-700">
-                <h4 className="font-bold text-white mb-4 flex items-center gap-2">
-                    <Plus size={16} className="text-blue-400"/> Nuevo Movimiento
-                </h4>
-                <div className="space-y-3">
-                    <input 
-                        className="w-full bg-[#0f172a] border border-slate-600 rounded p-2 text-sm text-white" 
-                        placeholder="Nombre (ej: Luz)" 
-                        value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}
-                    />
-                    <input 
-                        type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-2 text-sm text-white" 
-                        placeholder="0.00" 
-                        value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}
-                    />
-                    <div className="flex gap-2">
-                        <select 
-                            className="bg-[#0f172a] border border-slate-600 rounded p-2 text-sm text-white w-1/2"
-                            value={newItem.type} onChange={e => setNewItem({...newItem, type: e.target.value})}
-                        >
-                            <option value="expense">Gasto</option>
-                            <option value="income">Ingreso</option>
-                        </select>
-                        <select 
-                            className="bg-[#0f172a] border border-slate-600 rounded p-2 text-sm text-white w-1/2"
-                            value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}
-                        >
-                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                    </div>
-                    <button onClick={handleAdd} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded text-sm transition">
-                        Añadir
-                    </button>
-                </div>
-            </div>
+          {/* Remaining Balance (Highlight) */}
+          <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center relative overflow-hidden">
+             <div className="absolute bottom-0 left-0 w-full h-1 bg-emerald-500"></div>
+             <p className="text-slate-400 text-xs mb-2">Saldo Actual</p>
+             <h2 className="text-2xl font-bold text-white">${(2001.67 + netIncome).toFixed(2)}</h2>
+          </div>
         </div>
 
-        {/* --- COLUMNA CENTRAL Y DERECHA (GRÁFICOS) --- */}
-        <div className="lg:col-span-9 grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Gráfico Principal: Breakdown de Gastos */}
-            <div className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 md:col-span-2 flex flex-col md:flex-row items-center justify-between">
-                <div className="w-full md:w-1/2">
-                    <h3 className="text-lg font-bold text-white mb-2">Desglose de Gastos</h3>
-                    <p className="text-slate-400 text-sm mb-6">Visualización de dónde va tu dinero.</p>
-                    <ul className="space-y-2">
-                        {expensesByCategory.map((entry, index) => (
-                            <li key={index} className="flex items-center justify-between text-sm text-slate-300 border-b border-slate-700/50 pb-1">
-                                <span className="flex items-center gap-2">
-                                    <span className="w-3 h-3 rounded-full" style={{backgroundColor: COLORS[index % COLORS.length]}}></span>
-                                    {entry.name}
-                                </span>
-                                <span className="font-mono font-bold">${entry.value.toFixed(0)}</span>
-                            </li>
-                        ))}
-                    </ul>
+        {/* 2. ZONA CENTRAL (INGRESOS vs GASTOS) */}
+        <div className="md:col-span-6 flex flex-col gap-4">
+          {/* Fila Superior: Total Ingresos vs Total Gastos */}
+          <div className="grid grid-cols-2 gap-4 h-full">
+             {/* Total Income */}
+             <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
+                <h3 className="text-emerald-400 font-medium mb-1">Total Income</h3>
+                <h2 className="text-3xl font-bold text-white mb-4">${income.toFixed(2)}</h2>
+                {/* Barras comparativas fake vs presupuesto */}
+                <div className="space-y-2 text-xs">
+                   <div className="flex justify-between text-slate-500"><span>Budget</span><span>$7,200.00</span></div>
+                   <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-white h-full" style={{width: '90%'}}></div>
+                   </div>
+                   <div className="flex justify-between text-white mt-1"><span>Actual</span><span className="text-emerald-400">${income.toFixed(2)}</span></div>
+                   <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-emerald-500 h-full" style={{width: '100%'}}></div>
+                   </div>
                 </div>
-                <div className="w-full md:w-1/2 h-64">
+             </div>
+
+             {/* Total Expenses */}
+             <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
+                <h3 className="text-rose-500 font-medium mb-1">Total Expenses</h3>
+                <h2 className="text-3xl font-bold text-white mb-4">${totalExpenses.toFixed(2)}</h2>
+                <div className="space-y-2 text-xs">
+                   <div className="flex justify-between text-slate-500"><span>Budget</span><span>$7,140.00</span></div>
+                   <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-white h-full" style={{width: '95%'}}></div>
+                   </div>
+                   <div className="flex justify-between text-white mt-1"><span>Actual</span><span className="text-rose-500">${totalExpenses.toFixed(2)}</span></div>
+                   <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-rose-500 h-full" style={{width: `${Math.min((totalExpenses/7140)*100, 100)}%`}}></div>
+                   </div>
+                </div>
+             </div>
+          </div>
+
+          {/* Fila Inferior: Barras Largas */}
+          <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 flex flex-col justify-center gap-6">
+             {/* Barra Total Income vs Total Expense */}
+             <div>
+                <div className="flex justify-center gap-4 text-xs mb-2">
+                   <span className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500"></div> Total Income</span>
+                   <span className="flex items-center gap-1"><div className="w-2 h-2 bg-rose-500"></div> Total Expenses</span>
+                </div>
+                <div className="w-full h-4 bg-slate-800 rounded-full flex overflow-hidden">
+                    <div className="h-full bg-emerald-500" style={{width: '55%'}}></div>
+                    <div className="h-full bg-rose-500" style={{width: '45%'}}></div>
+                </div>
+             </div>
+
+             {/* Barra Multicolor de Categorías */}
+             <div>
+                 <div className="w-full h-8 bg-slate-800 rounded flex overflow-hidden">
+                     {categoryData.map((cat, i) => (
+                         <div key={i} style={{ width: `${(cat.value / totalExpenses) * 100}%`, backgroundColor: COLORS[i] }} 
+                              className="h-full flex items-center justify-center text-[10px] font-bold text-black/70 hover:opacity-80 transition-opacity"
+                              title={cat.name}>
+                             {cat.value > 0 && `${((cat.value/totalExpenses)*100).toFixed(0)}%`}
+                         </div>
+                     ))}
+                 </div>
+                 <div className="flex justify-between text-[10px] text-slate-500 mt-2 px-1">
+                     {CATEGORIES.map((cat, i) => (
+                         <span key={i} className="flex items-center gap-1">
+                             <div className="w-2 h-2 rounded-full" style={{backgroundColor: COLORS[i]}}></div> {cat}
+                         </span>
+                     ))}
+                 </div>
+             </div>
+          </div>
+        </div>
+
+        {/* 3. COLUMNA DERECHA (NET INCOME y DONUT) */}
+        <div className="md:col-span-3 flex flex-col gap-4">
+           {/* Net Income */}
+           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
+               <p className="text-slate-400 text-sm">Net Income</p>
+               <h2 className={`text-2xl font-bold mt-2 ${netIncome >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                   ${netIncome.toFixed(2)}
+               </h2>
+           </div>
+
+           {/* Donut Chart */}
+           <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 flex flex-col items-center justify-center">
+               <h3 className="text-slate-300 text-sm mb-4">Total Expenses Breakdown</h3>
+               <div className="w-full h-48 relative">
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
-                                data={expensesByCategory}
+                                data={donutData}
                                 cx="50%" cy="50%"
-                                innerRadius={60} outerRadius={80}
-                                paddingAngle={5}
+                                innerRadius={40} outerRadius={60}
+                                paddingAngle={2}
                                 dataKey="value"
+                                stroke="none"
                             >
-                                {expensesByCategory.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />
+                                {donutData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={COLORS[CATEGORIES.indexOf(entry.name)]} />
                                 ))}
                             </Pie>
-                            <Tooltip contentStyle={{backgroundColor: '#1e293b', border: 'none', borderRadius: '8px'}} />
+                            <RechartsTooltip contentStyle={{backgroundColor: '#0d1117', borderColor: '#30363d', borderRadius: '8px'}} itemStyle={{color: '#fff'}} />
                         </PieChart>
                     </ResponsiveContainer>
-                </div>
-            </div>
+                    {/* Texto Central del Donut */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <span className="text-xs font-bold text-slate-500">100%</span>
+                    </div>
+               </div>
+               {/* Leyenda Personalizada */}
+               <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
+                   {CATEGORIES.map((cat, i) => (
+                       <div key={i} className="flex items-center gap-2 text-[10px] text-slate-400">
+                           <div className="w-2 h-2 rounded-full" style={{backgroundColor: COLORS[i]}}></div>
+                           {cat}
+                       </div>
+                   ))}
+               </div>
+           </div>
+        </div>
 
-            {/* --- TARJETAS DE CATEGORÍAS (COMO EN LA FOTO) --- */}
-            {expensesByCategory.map((cat, index) => {
-                // Presupuestos ficticios (Simulados para que se vea bien)
-                const budgets = { 'Variable': 1200, 'Facturas': 800, 'Deuda': 500, 'Inversiones': 300, 'Ahorro': 200 };
-                // @ts-ignore
-                const budget = budgets[cat.name] || 500;
-                const percentage = Math.min((cat.value / budget) * 100, 100);
-                
-                // Iconos dinámicos
-                const icons = [<Target key="1"/>, <Zap key="2"/>, <CreditCard key="3"/>, <TrendingUp key="4"/>, <PiggyBank key="5"/>];
+        {/* 4. FILA INFERIOR (LAS 5 CATEGORÍAS) */}
+        <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-5 gap-4 mt-2">
+            {CATEGORIES.map((cat, index) => {
+                const total = categoryData.find(c => c.name === cat)?.value || 0;
+                // Si el gasto es 0, poner un mínimo para que se vea algo en el gráfico gris
+                const pieData = [
+                    { name: 'Used', value: total || 1 }, 
+                    { name: 'Remaining', value: (BUDGETS[cat] - total) > 0 ? (BUDGETS[cat] - total) : 0 }
+                ];
+                const pct = Math.min((total / BUDGETS[cat]) * 100, 100);
+                const color = COLORS[index];
 
                 return (
-                    <div key={index} className="bg-[#1e293b] p-6 rounded-xl border border-slate-800 relative overflow-hidden group hover:border-slate-600 transition">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className={`p-3 rounded-lg bg-opacity-20 text-white`} style={{backgroundColor: `${COLORS[index]}33`, color: COLORS[index]}}>
-                                {icons[index]}
-                            </div>
-                            <span className="text-xs text-slate-500 uppercase tracking-wider">{cat.name}</span>
-                        </div>
+                    <div key={cat} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden group">
+                        {/* Borde superior de color */}
+                        <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: color}}></div>
                         
-                        <div className="flex justify-between items-end mb-2">
-                            <h3 className="text-2xl font-bold text-white">${cat.value}</h3>
-                            <span className="text-xs text-slate-400">Meta: ${budget}</span>
+                        <h3 className="text-sm font-bold mb-1" style={{color: color}}>{cat}</h3>
+                        <h2 className="text-xl font-bold text-white mb-4">${total.toFixed(2)}</h2>
+                        
+                        {/* Mini Gráfico Circular por Categoría */}
+                        <div className="w-24 h-24 relative mb-4">
+                             <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={pieData}
+                                        cx="50%" cy="50%"
+                                        innerRadius={30} outerRadius={38}
+                                        startAngle={90} endAngle={-270}
+                                        dataKey="value"
+                                        stroke="none"
+                                    >
+                                        <Cell fill={color} />
+                                        <Cell fill="#30363d" />
+                                    </Pie>
+                                </PieChart>
+                             </ResponsiveContainer>
+                             <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                 <span className="text-[10px] text-slate-400">% Income</span>
+                                 <span className="text-xs font-bold text-white">{((total/income)*100 || 0).toFixed(0)}%</span>
+                             </div>
                         </div>
 
-                        {/* Barra de Progreso Circular Simulada con CSS lineal */}
-                        <div className="w-full bg-slate-700 h-1.5 rounded-full mb-2">
-                            <div className="h-1.5 rounded-full transition-all duration-1000" style={{width: `${percentage}%`, backgroundColor: COLORS[index]}}></div>
+                        {/* Barras de Presupuesto (Goal Progress) */}
+                        <div className="w-full space-y-2 mt-auto">
+                            <div className="flex justify-between text-[10px] text-slate-400">
+                                <span>Goal Progress</span>
+                                <span>{pct.toFixed(0)}%</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${pct}%`, backgroundColor: color }}></div>
+                            </div>
+                            
+                            <div className="flex justify-between text-[10px] pt-2 border-t border-slate-800 mt-2">
+                                <span className="text-slate-500">Budget</span>
+                                <span className="text-white">${BUDGETS[cat]}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px]">
+                                <span className="text-slate-500">Difference</span>
+                                <span className={BUDGETS[cat] - total >= 0 ? "text-emerald-400" : "text-rose-500"}>
+                                    ${(BUDGETS[cat] - total).toFixed(2)}
+                                </span>
+                            </div>
                         </div>
-                        <p className={`text-xs ${percentage > 100 ? 'text-rose-500' : 'text-emerald-400'} text-right`}>
-                            {percentage.toFixed(0)}% del presupuesto
-                        </p>
                     </div>
                 )
             })}
         </div>
-      </div>
-      
-      {/* Últimos movimientos (Tabla simple abajo) */}
-      <div className="mt-8 bg-[#1e293b] rounded-xl border border-slate-800 p-6">
-        <h3 className="text-white font-bold mb-4">Historial Reciente</h3>
-        <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-400">
-                <thead>
-                    <tr className="border-b border-slate-700">
-                        <th className="pb-2">Nombre</th>
-                        <th className="pb-2">Categoría</th>
-                        <th className="pb-2 text-right">Cantidad</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {transactions.slice(0, 5).map(t => (
-                        <tr key={t.id} className="border-b border-slate-800/50">
-                            <td className="py-3 text-white">{t.name}</td>
-                            <td className="py-3"><span className="px-2 py-1 rounded bg-[#0f172a] text-xs">{t.category}</span></td>
-                            <td className={`py-3 text-right font-bold ${t.type==='income' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                {t.type==='income' ? '+' : '-'}${t.amount}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
+
       </div>
     </div>
   );
