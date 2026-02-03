@@ -20,7 +20,7 @@ export default function Dashboard() {
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [steamItems, setSteamItems] = useState<any[]>([]);
   
-  // ESTADO DE PRESUPUESTOS (Dinámico)
+  // ESTADO DE PRESUPUESTOS
   const [budgets, setBudgets] = useState({
     'Nómina': 2500, 'Variable': 1200, 'Facturas': 800, 
     'Deuda': 500, 'Inversiones': 300, 'Ahorro': 200 
@@ -29,7 +29,9 @@ export default function Dashboard() {
   // MODALES
   const [showForm, setShowForm] = useState(false);
   const [showSteamForm, setShowSteamForm] = useState(false);
-  const [showBudgetSettings, setShowBudgetSettings] = useState(false); // Nuevo modal ajustes
+  
+  // MODAL EDICIÓN PRESUPUESTO INDIVIDUAL
+  const [editingBudget, setEditingBudget] = useState<{category: string, amount: number} | null>(null);
   
   // ESTADOS ADMIN
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -97,7 +99,6 @@ export default function Dashboard() {
     const { data, error } = await supabase.from('user_budgets').select('*').eq('user_id', userId).single();
     
     if (data) {
-        // Mapear columnas DB a nuestro objeto de estado
         setBudgets({
             'Nómina': data.nomina,
             'Variable': data.variable,
@@ -107,28 +108,38 @@ export default function Dashboard() {
             'Ahorro': data.ahorro
         });
     } else {
-        // Si no existe fila, creamos una por defecto
         const defaultBudgets = { user_id: userId, nomina: 2500, variable: 1200, facturas: 800, deuda: 500, inversiones: 300, ahorro: 200 };
         await supabase.from('user_budgets').insert([defaultBudgets]);
     }
   }
 
-  async function handleSaveBudgets() {
-    if (!session) return;
-    const { error } = await supabase.from('user_budgets').upsert({
-        user_id: session.user.id,
-        nomina: budgets['Nómina'],
-        variable: budgets['Variable'],
-        facturas: budgets['Facturas'],
-        deuda: budgets['Deuda'],
-        inversiones: budgets['Inversiones'],
-        ahorro: budgets['Ahorro']
-    });
+  // Guardar UN solo presupuesto (el que estamos editando)
+  async function handleUpdateSingleBudget() {
+    if (!session || !editingBudget) return;
 
-    if (error) alert("Error guardando presupuestos: " + error.message);
-    else {
-        setShowBudgetSettings(false);
-        // No hace falta recargar, el estado local ya tiene los datos nuevos
+    // Mapeo de nombres visuales a nombres de columna en DB (lowercase, sin acentos)
+    const dbColumnMap: any = {
+        'Nómina': 'nomina',
+        'Variable': 'variable',
+        'Facturas': 'facturas',
+        'Deuda': 'deuda',
+        'Inversiones': 'inversiones',
+        'Ahorro': 'ahorro'
+    };
+
+    const columnName = dbColumnMap[editingBudget.category];
+    
+    // Actualizamos solo esa columna
+    const { error } = await supabase.from('user_budgets').update({
+        [columnName]: editingBudget.amount
+    }).eq('user_id', session.user.id);
+
+    if (error) {
+        alert("Error al actualizar: " + error.message);
+    } else {
+        // Actualizamos estado local
+        setBudgets({ ...budgets, [editingBudget.category]: editingBudget.amount });
+        setEditingBudget(null); // Cerramos modal
     }
   }
 
@@ -280,7 +291,7 @@ export default function Dashboard() {
   const currentBalance = startBalance + netIncome; 
   const netWorth = currentBalance + steamNetValue; 
 
-  // Usamos el estado 'budgets' en lugar de la constante
+  // Usamos el estado 'budgets'
   const categoryData = DISPLAY_CATEGORIES.map(cat => {
     let value = 0;
     if (cat === 'Inversiones' || cat === 'Ahorro') {
@@ -350,35 +361,26 @@ export default function Dashboard() {
               )}
           </div>
 
-          {/* MODAL CONFIGURACIÓN PRESUPUESTOS */}
-          {showBudgetSettings && (
-             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700">
+          {/* MODAL EDITAR PRESUPUESTO INDIVIDUAL */}
+          {editingBudget && (
+             <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
+                <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-sm border border-slate-700">
                     <div className="flex justify-between mb-4 border-b border-slate-700 pb-2">
-                        <h3 className="font-bold text-xl flex items-center gap-2"><Settings size={20}/> Ajustar Presupuestos</h3>
-                        <button onClick={() => setShowBudgetSettings(false)}><X className="text-slate-400 hover:text-white"/></button>
+                        <h3 className="font-bold text-lg flex items-center gap-2"><Settings size={18}/> Límite {editingBudget.category}</h3>
+                        <button onClick={() => setEditingBudget(null)}><X className="text-slate-400 hover:text-white"/></button>
                     </div>
-                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-                        {CATEGORIES.map(cat => (
-                            <div key={cat} className="flex flex-col gap-1">
-                                <label className="text-xs text-slate-400 flex justify-between">
-                                    {cat} 
-                                    <span style={{color: COLORS[CATEGORIES.indexOf(cat)]}}>●</span>
-                                </label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
-                                    <input 
-                                        type="number" 
-                                        className="w-full bg-[#0f172a] border border-slate-600 rounded p-2 pl-7 text-white"
-                                        value={budgets[cat as keyof typeof budgets]}
-                                        onChange={(e) => setBudgets({...budgets, [cat]: parseFloat(e.target.value) || 0})}
-                                    />
-                                </div>
-                            </div>
-                        ))}
+                    <div className="flex flex-col gap-1 mb-4">
+                        <label className="text-xs text-slate-400">Nuevo Objetivo Mensual (€)</label>
+                        <input 
+                            type="number" 
+                            autoFocus
+                            className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white text-lg"
+                            value={editingBudget.amount}
+                            onChange={(e) => setEditingBudget({...editingBudget, amount: parseFloat(e.target.value) || 0})}
+                        />
                     </div>
-                    <button onClick={handleSaveBudgets} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg mt-4 flex justify-center gap-2">
-                        <Save size={18}/> Guardar Cambios
+                    <button onClick={handleUpdateSingleBudget} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg flex justify-center gap-2">
+                        <Save size={18}/> Actualizar
                     </button>
                 </div>
              </div>
@@ -462,18 +464,10 @@ export default function Dashboard() {
                         {userName} {isAdmin && <span className="text-xs ml-1 opacity-70">(Admin)</span>}
                       </h2>
                     </div>
-                    {/* BOTÓN SETTINGS (NUEVO) */}
-                    <button 
-                        onClick={() => setShowBudgetSettings(true)}
-                        className="bg-slate-800 p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all ml-2 border border-slate-700"
-                        title="Configurar Presupuestos"
-                    >
-                        <Settings size={20} />
-                    </button>
                 </div>
                 <div className="text-right hidden md:block">
                     <p className="text-slate-400 text-xs">Patrimonio Total (Net Worth)</p>
-                    <h2 className={`text-2xl font-bold ${isAdmin ? 'text-red-500' : 'text-emerald-400'}`}>{formatEuro(netWorth)}</h2>
+                    <h2 className={`text-2xl font-bold ${isAdmin ? 'text-white-500' : 'text-emerald-400'}`}>{formatEuro(netWorth)}</h2>
                 </div>
             </div>
 
@@ -512,7 +506,7 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* SECCIÓN STEAM REDISEÑADA */}
+                {/* SECCIÓN STEAM */}
                 <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 flex flex-col h-full max-h-[350px]">
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold text-white flex items-center gap-2"><Gamepad2 className="text-sky-400" size={20}/> Cartera Steam</h3>
@@ -579,11 +573,10 @@ export default function Dashboard() {
                 )}
             </div>
 
-            {/* FILA INFERIOR (PRESUPUESTOS DINÁMICOS) */}
+            {/* FILA INFERIOR (PRESUPUESTOS DINÁMICOS CON EDICIÓN INDIVIDUAL) */}
             <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-5 gap-4">
                 {DISPLAY_CATEGORIES.map((cat, index) => {
                     const totalUsed = categoryData.find(c => c.name === cat)?.value || 0;
-                    // Aquí usamos el estado 'budgets' en lugar de la constante
                     const limit = budgets[cat as keyof typeof budgets] || 0;
                     const remaining = limit - totalUsed;
                     const pct = limit > 0 ? Math.min((totalUsed / limit) * 100, 100) : 100;
@@ -592,7 +585,7 @@ export default function Dashboard() {
                     const pieData = [{ name: 'Gastado', value: totalUsed || 1 }, { name: 'Restante', value: remaining > 0 ? remaining : 0 }];
                     
                     return (
-                        <div key={cat} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden">
+                        <div key={cat} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden group">
                             <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: color}}></div>
                             <h3 className="text-xs font-bold mb-1 uppercase tracking-wide" style={{color: color}}>{cat}</h3>
                             
@@ -611,7 +604,17 @@ export default function Dashboard() {
 
                             <div className="text-center w-full">
                                 <p className="text-lg font-bold text-white">{formatEuro(totalUsed)}</p>
-                                <p className="text-[10px] text-slate-500 border-t border-slate-700 pt-1 mt-1">Límite: <span className="text-slate-300">{formatEuro(limit)}</span></p>
+                                <div className="text-[10px] text-slate-500 border-t border-slate-700 pt-1 mt-1 flex items-center justify-center gap-1 group">
+                                    Límite: <span className="text-slate-300">{formatEuro(limit)}</span>
+                                    {/* BOTÓN DE EDICIÓN RÁPIDA (ENGRANAJE) */}
+                                    <button 
+                                        onClick={() => setEditingBudget({category: cat, amount: limit})}
+                                        className="text-slate-500 hover:text-white transition-colors"
+                                        title={`Editar límite de ${cat}`}
+                                    >
+                                        <Settings size={12} />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )
