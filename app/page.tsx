@@ -22,14 +22,12 @@ export default function Dashboard() {
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   
-  // --- MÁQUINA DEL TIEMPO (RECUPERADA) ---
-  // Usamos currentDate en lugar de "now" fijo para poder viajar en el historial
+  // --- MÁQUINA DEL TIEMPO ---
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const currentMonthIndex = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
 
-  // Funciones de navegación
   const goToPrevMonth = () => setCurrentDate(new Date(currentYear, currentMonthIndex - 1, 1));
   const goToNextMonth = () => setCurrentDate(new Date(currentYear, currentMonthIndex + 1, 1));
   const goToToday = () => setCurrentDate(new Date());
@@ -126,7 +124,7 @@ export default function Dashboard() {
     if (!error) setAllTransactions([]);
   }
 
-  // --- CÁLCULOS FILTRADOS POR LA FECHA SELECCIONADA (currentDate) ---
+  // --- CÁLCULOS PRINCIPALES ---
   const currentMonthTransactions = allTransactions.filter(t => {
     const d = new Date(t.date);
     return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
@@ -145,12 +143,29 @@ export default function Dashboard() {
                        pastTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const currentBalance = startBalance + netIncome;
 
-  const categoryData = CATEGORIES.map(cat => ({
-    name: cat, 
-    value: currentMonthTransactions.filter(t => t.type === 'expense' && t.category === cat).reduce((acc, t) => acc + t.amount, 0)
-  }));
-  const donutData = categoryData.filter(c => c.value > 0);
+  // --- LÓGICA DE CATEGORÍAS CORREGIDA ---
+  // Aquí es donde hacemos la magia: 
+  // - Si es Ahorro o Inversión: Sumamos TODO (Ingresos + Gastos) porque son metas de acumulación.
+  // - Si es Variable, Facturas, Deuda: Sumamos solo GASTOS porque son límites.
+  const categoryData = CATEGORIES.map(cat => {
+    let value = 0;
+    
+    if (cat === 'Inversiones' || cat === 'Ahorro') {
+        // Para metas: Sumamos todo lo que tenga esa categoría (Ingresos Y Gastos)
+        value = currentMonthTransactions
+            .filter(t => t.category === cat)
+            .reduce((acc, t) => acc + t.amount, 0);
+    } else {
+        // Para límites: Sumamos solo lo que sea Gasto
+        value = currentMonthTransactions
+            .filter(t => t.type === 'expense' && t.category === cat)
+            .reduce((acc, t) => acc + t.amount, 0);
+    }
 
+    return { name: cat, value };
+  });
+
+  const donutData = categoryData.filter(c => c.value > 0);
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
 
   // --- VISTA LOGIN ---
@@ -203,11 +218,9 @@ export default function Dashboard() {
       {/* Botones Flotantes */}
       <button 
         onClick={() => {
-            // Pre-rellenar fecha con el mes que estamos viendo
             const today = new Date();
             let defaultDate = new Date(currentYear, currentMonthIndex, 1);
             if(today.getMonth() === currentMonthIndex && today.getFullYear() === currentYear) defaultDate = today;
-            // Ajuste zona horaria
             const offset = defaultDate.getTimezoneOffset();
             const adjustedDate = new Date(defaultDate.getTime() - (offset*60*1000));
             setNewItem({...newItem, date: adjustedDate.toISOString().split('T')[0]});
@@ -265,22 +278,16 @@ export default function Dashboard() {
         
         {/* COLUMNA IZQUIERDA */}
         <div className="md:col-span-3 space-y-4">
-          
-          {/* HEADER DEL MES CON NAVEGACIÓN RECUPERADA */}
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center relative group select-none">
              <button onClick={goToPrevMonth} className="absolute left-2 top-1/2 -translate-y-1/2 p-2 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition"><ChevronLeft size={24} /></button>
              <button onClick={goToNextMonth} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition"><ChevronRight size={24} /></button>
-             
              <h1 className="text-3xl font-light text-white cursor-pointer" onClick={goToToday}>{currentMonthName}</h1>
              <p className="text-slate-500 text-xs uppercase tracking-widest mt-1">- {currentYear} Dashboard -</p>
           </div>
-
           <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
              <span className="text-slate-400 text-xs">Saldo Inicial (Ant.)</span>
              <span className="text-white font-mono">{formatEuro(startBalance)}</span>
           </div>
-
-          {/* Indicador visual de si estamos en el pasado o presente */}
           <div className="bg-[#161b22] px-4 py-3 rounded-xl border border-slate-800 text-center">
              {new Date().getMonth() === currentMonthIndex && new Date().getFullYear() === currentYear ? (
                  <span className="text-emerald-400 text-xs font-bold flex items-center justify-center gap-2"><span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span> Mes En curso</span>
@@ -288,7 +295,6 @@ export default function Dashboard() {
                  <span className="text-slate-400 text-xs font-bold flex items-center justify-center gap-2"><Calendar size={12}/> Visualizando Historial</span>
              )}
           </div>
-
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center relative overflow-hidden">
              <div className="absolute bottom-0 left-0 w-full h-1 bg-emerald-500"></div>
              <p className="text-slate-400 text-xs mb-2">Saldo Final {currentMonthName}</p>
@@ -298,17 +304,10 @@ export default function Dashboard() {
 
         {/* CONTENIDO CENTRAL */}
         <div className="md:col-span-6 flex flex-col gap-4">
-            
-            {/* SALUDO */}
             <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex items-center gap-4">
                 <div className="bg-slate-800 p-3 rounded-full"><User className="text-emerald-400" size={24} /></div>
-                <div>
-                    <p className="text-slate-400 text-xs uppercase tracking-wider">Panel de Control</p>
-                    <h2 className="text-lg font-bold text-white">Bienvenido, {userName}</h2>
-                </div>
+                <div><p className="text-slate-400 text-xs uppercase tracking-wider">Panel de Control</p><h2 className="text-lg font-bold text-white">Bienvenido, {userName}</h2></div>
             </div>
-
-            {/* TARJETAS COMPACTAS */}
             <div className="grid grid-cols-2 gap-4">
                 <div className="bg-[#161b22] px-4 py-5 rounded-xl border border-slate-800 flex flex-col justify-between h-32 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
@@ -321,8 +320,6 @@ export default function Dashboard() {
                     <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2"><div className="bg-rose-500 h-full" style={{width: `${Math.min((totalExpenses/2000)*100, 100)}%`}}></div></div>
                 </div>
             </div>
-
-            {/* BARRAS DE PROGRESO */}
             <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 flex flex-col justify-center gap-6">
                 <div>
                     <div className="flex justify-center gap-4 text-xs mb-2">
@@ -348,7 +345,7 @@ export default function Dashboard() {
             </div>
         </div>
 
-        {/* COLUMNA DERECHA (DESGLOSE) */}
+        {/* COLUMNA DERECHA */}
         <div className="md:col-span-3 flex flex-col gap-4">
             <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
                 <p className="text-slate-400 text-sm">Balance Neto</p>
@@ -356,8 +353,6 @@ export default function Dashboard() {
                     {formatEuro(netIncome)}
                 </h2>
             </div>
-            
-            {/* GRÁFICO REPARADO (Ahora tiene Leyenda abajo) */}
             <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 flex flex-col items-center justify-center">
                 <h3 className="text-slate-300 text-sm mb-4">Desglose {currentMonthName}</h3>
                 <div className="w-full h-48 relative">
@@ -372,8 +367,6 @@ export default function Dashboard() {
                             </ResponsiveContainer>
                         ) : <p className="text-xs text-slate-600 flex h-full items-center justify-center">Sin gastos</p>}
                 </div>
-                
-                {/* LEYENDA RECUPERADA (Esto faltaba) */}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
                    {CATEGORIES.map((cat, i) => (
                        <div key={i} className="flex items-center gap-2 text-[10px] text-slate-400">
@@ -382,7 +375,6 @@ export default function Dashboard() {
                        </div>
                    ))}
                </div>
-
             </div>
         </div>
 
@@ -407,8 +399,8 @@ export default function Dashboard() {
                                 </PieChart>
                              </ResponsiveContainer>
                              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                 <span className="text-[10px] text-slate-400">% Ingreso</span>
-                                 <span className="text-xs font-bold text-white">{((total/(income || 1))*100).toFixed(0)}%</span>
+                                 <span className="text-[10px] text-slate-400">% Objetivo</span>
+                                 <span className="text-xs font-bold text-white">{((total/(BUDGETS[cat] || 1))*100).toFixed(0)}%</span>
                              </div>
                         </div>
                         <div className="w-full space-y-2 mt-auto">
