@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2 } from 'lucide-react';
+import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2, RefreshCw } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 
 export default function Dashboard() {
@@ -22,8 +22,9 @@ export default function Dashboard() {
   const [showForm, setShowForm] = useState(false);
   const [showSteamForm, setShowSteamForm] = useState(false);
 
-  // Estados Steam Fetch
+  // Estados Steam
   const [fetchingPrice, setFetchingPrice] = useState(false);
+  const [refreshingSteam, setRefreshingSteam] = useState(false); // Estado para la actualización masiva
 
   // --- MÁQUINA DEL TIEMPO ---
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -80,6 +81,17 @@ export default function Dashboard() {
   }
 
   // --- LÓGICA STEAM API ---
+  
+  // Función auxiliar para limpiar el precio de Steam (texto a número)
+  const parseSteamPrice = (priceStr: string) => {
+    // Reemplazar coma por punto, quitar símbolo de moneda, quitar espacios
+    let clean = priceStr.replace('€', '').replace('$', '').replace(',', '.').trim();
+    // Corregir formato "1,--"
+    clean = clean.replace('--', '00').replace('-', '00');
+    return parseFloat(clean);
+  };
+
+  // 1. Obtener precio para añadir item nuevo
   async function getSteamPrice() {
     if(!newSteamItem.name) return;
     setFetchingPrice(true);
@@ -88,21 +100,53 @@ export default function Dashboard() {
         const data = await response.json();
         
         if (data.lowest_price || data.median_price) {
-            // Steam devuelve "0,35€" o "1.20€". Limpiamos el string.
-            let priceString = data.lowest_price || data.median_price;
-            // Reemplazar coma por punto y quitar símbolo de moneda
-            priceString = priceString.replace('€', '').replace(',', '.').trim();
-            // A veces sale "1,--" si es exacto, corregimos eso si pasara
-            priceString = priceString.replace('--', '00');
-            
-            setNewSteamItem(prev => ({ ...prev, price: priceString }));
+            const rawPrice = data.lowest_price || data.median_price;
+            // Solo mostramos el texto limpio en el input, el guardado lo convierte a float
+            const cleanPrice = parseSteamPrice(rawPrice);
+            setNewSteamItem(prev => ({ ...prev, price: cleanPrice.toString() }));
         } else {
-            alert("No encontrado. Asegúrate de escribir el nombre exacto en inglés (ej: 'Revolution Case').");
+            alert("No encontrado. Prueba con el nombre exacto en inglés.");
         }
     } catch (error) {
         alert("Error al conectar con Steam.");
     }
     setFetchingPrice(false);
+  }
+
+  // 2. ACTUALIZACIÓN MASIVA DE PRECIOS
+  async function refreshAllSteamPrices() {
+    if (steamItems.length === 0) return;
+    setRefreshingSteam(true);
+
+    // Creamos un array de promesas para actualizar todo en paralelo
+    const updates = steamItems.map(async (item) => {
+        try {
+            const response = await fetch(`/api/steam?name=${encodeURIComponent(item.item_name)}`);
+            const data = await response.json();
+            const rawPrice = data.lowest_price || data.median_price;
+
+            if (rawPrice) {
+                const newPrice = parseSteamPrice(rawPrice);
+                
+                // Si el precio ha cambiado, actualizamos en DB
+                if (newPrice !== item.current_price) {
+                    await supabase
+                        .from('steam_portfolio')
+                        .update({ current_price: newPrice })
+                        .eq('id', item.id);
+                }
+            }
+        } catch (error) {
+            console.error(`Error actualizando ${item.item_name}`);
+        }
+    });
+
+    // Esperamos a que todas las actualizaciones terminen
+    await Promise.all(updates);
+    
+    // Recargamos los datos para ver los nuevos totales
+    await fetchSteamPortfolio();
+    setRefreshingSteam(false);
   }
 
   // --- FUNCIONES DB TRANSACCIONES ---
@@ -199,12 +243,6 @@ export default function Dashboard() {
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
   
-  async function handleClearDatabase() {
-    if(!confirm("¿Borrar TUS datos?")) return;
-    const { error } = await supabase.from('transactions').delete().neq('id', 0);
-    if (!error) setAllTransactions([]);
-  }
-
   // --- VISTA LOGIN ---
   if (!session) return (
     <div className="min-h-screen flex items-center justify-center p-4 font-sans" style={{ backgroundColor: THEME.bg }}>
@@ -237,11 +275,8 @@ export default function Dashboard() {
         className="fixed bottom-8 right-8 z-50 bg-emerald-500 hover:bg-emerald-400 text-black font-bold p-4 rounded-full shadow-2xl hover:scale-110 transition-all"><Plus size={24} />
       </button>
 
-      {/* Botones Izquierda Inferior (Salir y Basura) */}
-      <div className="fixed bottom-8 left-8 z-50 flex flex-col gap-3">
-          <button onClick={handleClearDatabase} className="bg-rose-900/50 hover:bg-rose-600 text-rose-200 hover:text-white p-3 rounded-full shadow-lg border border-rose-800 transition-all w-fit" title="Borrar DB">
-            <Trash2 size={20} />
-          </button>
+      {/* Botón Salir (Izquierda Inferior, Solo) */}
+      <div className="fixed bottom-8 left-8 z-50">
           <button onClick={handleLogout} className="bg-[#1e293b] hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-full shadow-xl border border-slate-600 flex items-center gap-2 transition-all">
             <LogOut size={18} /> Salir
           </button>
@@ -266,7 +301,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* MODAL STEAM (CON FETCH) */}
+      {/* MODAL STEAM */}
       {showSteamForm && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
           <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700">
@@ -278,7 +313,7 @@ export default function Dashboard() {
                     placeholder="Market Hash Name (ej: Recoil Case)" 
                     value={newSteamItem.name} 
                     onChange={e => setNewSteamItem({...newSteamItem, name: e.target.value})}
-                    onBlur={getSteamPrice} // Al salir del campo, busca el precio
+                    onBlur={getSteamPrice}
                  />
                  <button onClick={getSteamPrice} disabled={fetchingPrice} className="bg-sky-500/20 text-sky-400 p-3 rounded border border-sky-500/50">
                     {fetchingPrice ? <Loader2 className="animate-spin" size={20}/> : <Search size={20}/>}
@@ -346,11 +381,21 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* SECCIÓN STEAM */}
+            {/* SECCIÓN STEAM CON BOTÓN REFRESH */}
             <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-white flex items-center gap-2"><Gamepad2 className="text-sky-400" size={20}/> Cartera Steam</h3>
-                    <button onClick={() => setShowSteamForm(true)} className="text-xs bg-sky-500/10 text-sky-400 px-2 py-1 rounded hover:bg-sky-500/20">+ Añadir Caja</button>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={refreshAllSteamPrices} 
+                            disabled={refreshingSteam}
+                            className="text-xs bg-slate-700 text-white px-2 py-1 rounded hover:bg-slate-600 flex items-center gap-1"
+                            title="Actualizar precios actuales de mercado"
+                        >
+                            <RefreshCw size={12} className={refreshingSteam ? "animate-spin" : ""} />
+                        </button>
+                        <button onClick={() => setShowSteamForm(true)} className="text-xs bg-sky-500/10 text-sky-400 px-2 py-1 rounded hover:bg-sky-500/20">+ Añadir Caja</button>
+                    </div>
                 </div>
                 {steamItems.length === 0 ? (
                     <p className="text-xs text-slate-500 text-center py-4">No tienes inversiones en Counter Strike.</p>
