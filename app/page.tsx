@@ -35,10 +35,10 @@ export default function Dashboard() {
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const currentMonthName = capitalize(currentDate.toLocaleString('es-ES', { month: 'long' }));
 
-  // --- TEMA Y COLORES (AÑADIDA NÓMINA) ---
+  // --- TEMA Y COLORES ---
   const THEME = {
     bg: '#0d1117', card: '#161b22', text: '#ffffff',
-    nomina: '#0ea5e9',    // Azul Cielo (Nuevo)
+    nomina: '#0ea5e9',    // Azul Cielo
     variable: '#f43f5e',  // Rosa
     facturas: '#fbbf24',  // Amarillo
     deuda: '#3b82f6',     // Azul
@@ -46,12 +46,14 @@ export default function Dashboard() {
     ahorro: '#10b981',    // Verde
   };
 
-  // AÑADIDA 'Nómina' AL PRINCIPIO DE LA LISTA
+  // CATEGORÍAS (Todas, para el formulario)
   const CATEGORIES = ['Nómina', 'Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
   
-  // OBJETIVOS (Para Nómina es "Cuánto espero ganar", para Gastos es "Límite")
+  // Categorías que SÍ queremos ver en las tarjetas de abajo (Excluimos Nómina)
+  const DISPLAY_CATEGORIES = ['Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
+
   const BUDGETS: any = { 
-    'Nómina': 2500,     // Meta de ingreso mensual
+    'Nómina': 2500,
     'Variable': 1200, 
     'Facturas': 800, 
     'Deuda': 500, 
@@ -59,6 +61,7 @@ export default function Dashboard() {
     'Ahorro': 200 
   };
   
+  // Mapeo de colores (el orden debe coincidir con CATEGORIES)
   const COLORS = [THEME.nomina, THEME.variable, THEME.facturas, THEME.deuda, THEME.inversiones, THEME.ahorro];
 
   const [newItem, setNewItem] = useState({ 
@@ -159,22 +162,17 @@ export default function Dashboard() {
                        pastTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const currentBalance = startBalance + netIncome;
 
-  // --- LÓGICA DE CATEGORÍAS ACTUALIZADA ---
-  const categoryData = CATEGORIES.map(cat => {
+  // Calculamos datos SOLO para lo que queremos mostrar en gráficas (excluyendo Nómina)
+  const categoryData = DISPLAY_CATEGORIES.map(cat => {
     let value = 0;
     
-    if (cat === 'Nómina') {
-        // NÓMINA: Solo suma INGRESOS
-        value = currentMonthTransactions
-            .filter(t => t.type === 'income' && t.category === cat)
-            .reduce((acc, t) => acc + t.amount, 0);
-    } else if (cat === 'Inversiones' || cat === 'Ahorro') {
-        // METAS: Suma TODO (Ingresos + Gastos)
+    if (cat === 'Inversiones' || cat === 'Ahorro') {
+        // Metas: Sumamos todo
         value = currentMonthTransactions
             .filter(t => t.category === cat)
             .reduce((acc, t) => acc + t.amount, 0);
     } else {
-        // GASTOS PUROS (Variable, Facturas, Deuda): Suma solo GASTOS
+        // Gastos: Sumamos solo gastos
         value = currentMonthTransactions
             .filter(t => t.type === 'expense' && t.category === cat)
             .reduce((acc, t) => acc + t.amount, 0);
@@ -351,13 +349,19 @@ export default function Dashboard() {
                 </div>
                 <div>
                     <div className="w-full h-8 bg-slate-800 rounded flex overflow-hidden">
-                        {categoryData.map((cat, i) => (
-                            <div key={i} style={{ width: `${(cat.value / (totalExpenses || 1)) * 100}%`, backgroundColor: COLORS[i] }} 
-                                className="h-full flex items-center justify-center text-[10px] font-bold text-black/70 hover:opacity-80 transition-opacity"
-                                title={cat.name}>
-                                {cat.value > 0 && `${((cat.value/totalExpenses)*100).toFixed(0)}%`}
-                            </div>
-                        ))}
+                        {categoryData.map((cat, i) => {
+                             // Buscamos el color original
+                             const originalIndex = CATEGORIES.indexOf(cat.name);
+                             const color = COLORS[originalIndex];
+                             
+                             return (
+                                <div key={i} style={{ width: `${(cat.value / (totalExpenses || 1)) * 100}%`, backgroundColor: color }} 
+                                    className="h-full flex items-center justify-center text-[10px] font-bold text-black/70 hover:opacity-80 transition-opacity"
+                                    title={cat.name}>
+                                    {cat.value > 0 && `${((cat.value/totalExpenses)*100).toFixed(0)}%`}
+                                </div>
+                             )
+                        })}
                     </div>
                 </div>
             </div>
@@ -378,7 +382,10 @@ export default function Dashboard() {
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                     <Pie data={donutData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={2} dataKey="value" stroke="none">
-                                        {donutData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[CATEGORIES.indexOf(entry.name)]} />)}
+                                        {donutData.map((entry, index) => {
+                                            const originalIndex = CATEGORIES.indexOf(entry.name);
+                                            return <Cell key={`cell-${index}`} fill={COLORS[originalIndex]} />
+                                        })}
                                     </Pie>
                                     <RechartsTooltip formatter={(value: number) => formatEuro(value)} contentStyle={{backgroundColor: '#0d1117', border:'none'}} itemStyle={{color:'#fff'}} />
                                 </PieChart>
@@ -386,24 +393,29 @@ export default function Dashboard() {
                         ) : <p className="text-xs text-slate-600 flex h-full items-center justify-center">Sin gastos</p>}
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
-                   {CATEGORIES.map((cat, i) => (
-                       <div key={i} className="flex items-center gap-2 text-[10px] text-slate-400">
-                           <div className="w-2 h-2 rounded-full" style={{backgroundColor: COLORS[i]}}></div>
-                           {cat}
-                       </div>
-                   ))}
+                   {DISPLAY_CATEGORIES.map((cat, i) => {
+                       const originalIndex = CATEGORIES.indexOf(cat);
+                       return (
+                           <div key={i} className="flex items-center gap-2 text-[10px] text-slate-400">
+                               <div className="w-2 h-2 rounded-full" style={{backgroundColor: COLORS[originalIndex]}}></div>
+                               {cat}
+                           </div>
+                       )
+                   })}
                </div>
             </div>
         </div>
 
-        {/* FILA INFERIOR (AHORA CON 6 COLUMNAS SI HAY ESPACIO O GRID ADAPTATIVO) */}
-        <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mt-2">
-            {CATEGORIES.map((cat, index) => {
+        {/* FILA INFERIOR (Solo DISPLAY_CATEGORIES) */}
+        <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-5 gap-4 mt-2">
+            {DISPLAY_CATEGORIES.map((cat) => {
                 const total = categoryData.find(c => c.name === cat)?.value || 0;
-                // Si es Nómina (Ingreso), mostramos "Conseguido" vs "Meta". Si es Gasto, "Usado" vs "Restante"
-                const pieData = [{ name: 'Actual', value: total || 1 }, { name: 'Restante', value: (BUDGETS[cat] - total) > 0 ? (BUDGETS[cat] - total) : 0 }];
+                const originalIndex = CATEGORIES.indexOf(cat);
+                const color = COLORS[originalIndex];
+                
+                const pieData = [{ name: 'Usado', value: total || 1 }, { name: 'Restante', value: (BUDGETS[cat] - total) > 0 ? (BUDGETS[cat] - total) : 0 }];
                 const pct = Math.min((total / BUDGETS[cat]) * 100, 100);
-                const color = COLORS[index];
+                
                 return (
                     <div key={cat} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden group">
                         <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: color}}></div>
@@ -419,7 +431,7 @@ export default function Dashboard() {
                              </ResponsiveContainer>
                              <div className="absolute inset-0 flex flex-col items-center justify-center">
                                  <span className="text-[10px] text-slate-400">
-                                     {cat === 'Nómina' ? '% Conseguido' : '% Usado'}
+                                     % Objetivo
                                  </span>
                                  <span className="text-xs font-bold text-white">{((total/(cat === 'Nómina' ? BUDGETS[cat] : (income || 1)))*100).toFixed(0)}%</span>
                              </div>
