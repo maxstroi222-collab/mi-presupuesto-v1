@@ -324,7 +324,7 @@ const isAdmin = session?.user?.app_metadata?.role === 'admin';
              </div>
              <div className="text-right hidden md:block">
                  <p className="text-slate-400 text-xs">Patrimonio Total (Net Worth)</p>
-                 <h2 className={`text-2xl font-bold ${isAdmin ? 'text-red-500' : 'text-emerald-400'}`}>{formatEuro(netWorth)}</h2>
+                 <h2 className={`text-2xl font-bold ${isAdmin ? 'text-white-500' : 'text-emerald-400'}`}>{formatEuro(netWorth)}</h2>
              </div>
         </div>
 
