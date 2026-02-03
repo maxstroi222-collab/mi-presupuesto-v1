@@ -2,10 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
-import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, 
-} from 'recharts';
+import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, TrendingUp } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 
 export default function Dashboard() {
   // --- ESTADOS DE USUARIO ---
@@ -20,11 +18,12 @@ export default function Dashboard() {
 
   // --- ESTADOS DE DATOS ---
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
+  const [steamItems, setSteamItems] = useState<any[]>([]); // Nuevo estado para CS
   const [showForm, setShowForm] = useState(false);
-  
+  const [showSteamForm, setShowSteamForm] = useState(false); // Formulario para añadir cajas
+
   // --- MÁQUINA DEL TIEMPO ---
   const [currentDate, setCurrentDate] = useState(new Date());
-
   const currentMonthIndex = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
 
@@ -38,112 +37,102 @@ export default function Dashboard() {
   // --- TEMA Y COLORES ---
   const THEME = {
     bg: '#0d1117', card: '#161b22', text: '#ffffff',
-    nomina: '#0ea5e9',    // Azul Cielo
-    variable: '#f43f5e',  // Rosa
-    facturas: '#fbbf24',  // Amarillo
-    deuda: '#3b82f6',     // Azul
-    inversiones: '#8b5cf6', // Morado
-    ahorro: '#10b981',    // Verde
+    nomina: '#0ea5e9', variable: '#f43f5e', facturas: '#fbbf24', 
+    deuda: '#3b82f6', inversiones: '#8b5cf6', ahorro: '#10b981',
+    steam: '#66c0f4' // Azul Steam
   };
 
-  // CATEGORÍAS (Todas, para el formulario)
   const CATEGORIES = ['Nómina', 'Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
-  
-  // Categorías que SÍ queremos ver en las tarjetas de abajo (Excluimos Nómina)
   const DISPLAY_CATEGORIES = ['Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
-
+  
   const BUDGETS: any = { 
-    'Nómina': 2500,
-    'Variable': 1200, 
-    'Facturas': 800, 
-    'Deuda': 500, 
-    'Inversiones': 300, 
-    'Ahorro': 200 
+    'Nómina': 2500, 'Variable': 1200, 'Facturas': 800, 
+    'Deuda': 500, 'Inversiones': 300, 'Ahorro': 200 
   };
   
-  // Mapeo de colores (el orden debe coincidir con CATEGORIES)
   const COLORS = [THEME.nomina, THEME.variable, THEME.facturas, THEME.deuda, THEME.inversiones, THEME.ahorro];
 
-  const [newItem, setNewItem] = useState({ 
-    name: '', amount: '', type: 'expense', category: 'Variable',
-    date: new Date().toISOString().split('T')[0]
-  });
+  // Estado para nuevos items (Transacción y Steam)
+  const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: 'Variable', date: new Date().toISOString().split('T')[0] });
+  const [newSteamItem, setNewSteamItem] = useState({ name: '', quantity: '', price: '' });
 
-  // 1. VERIFICAR SESIÓN
+  // 1. CARGA INICIAL
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if(session) fetchTransactions();
+      if(session) loadAllData();
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if(session) fetchTransactions();
-      else setAllTransactions([]);
+      if(session) loadAllData();
+      else { setAllTransactions([]); setSteamItems([]); }
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. AUTH
+  async function loadAllData() {
+    fetchTransactions();
+    fetchSteamPortfolio();
+  }
+
+  // --- FUNCIONES DB TRANSACCIONES ---
+  async function fetchTransactions() {
+    const { data } = await supabase.from('transactions').select('*').order('date', { ascending: false });
+    if (data) setAllTransactions(data);
+  }
+
+  async function handleAdd() {
+    if (!newItem.name || !newItem.amount || !session) return;
+    const { error } = await supabase.from('transactions').insert([{ 
+      user_id: session.user.id, name: newItem.name, amount: parseFloat(newItem.amount), 
+      type: newItem.type, category: newItem.category, date: new Date(newItem.date).toISOString() 
+    }]);
+    if (!error) { setNewItem({ ...newItem, name: '', amount: '' }); setShowForm(false); fetchTransactions(); }
+  }
+
+  async function handleDelete(id: number) {
+    if(!confirm("¿Borrar este movimiento?")) return;
+    const { error } = await supabase.from('transactions').delete().eq('id', id);
+    if (!error) fetchTransactions();
+  }
+
+  // --- FUNCIONES DB STEAM ---
+  async function fetchSteamPortfolio() {
+    const { data } = await supabase.from('steam_portfolio').select('*');
+    if (data) setSteamItems(data);
+  }
+
+  async function handleAddSteam() {
+    if (!newSteamItem.name || !newSteamItem.quantity || !newSteamItem.price || !session) return;
+    const { error } = await supabase.from('steam_portfolio').insert([{ 
+      user_id: session.user.id, item_name: newSteamItem.name, 
+      quantity: parseInt(newSteamItem.quantity), current_price: parseFloat(newSteamItem.price)
+    }]);
+    if (!error) { setNewSteamItem({ name: '', quantity: '', price: '' }); setShowSteamForm(false); fetchSteamPortfolio(); }
+  }
+
+  async function handleDeleteSteam(id: number) {
+    const { error } = await supabase.from('steam_portfolio').delete().eq('id', id);
+    if (!error) fetchSteamPortfolio();
+  }
+
+  async function handleLogout() { await supabase.auth.signOut(); }
   async function handleAuth() {
     setLoading(true);
     if (authMode === 'login') {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) alert(error.message);
     } else {
-      if (!fullName) { alert("Introduce tu nombre"); setLoading(false); return; }
-      const { error } = await supabase.auth.signUp({ 
-        email, password, options: { data: { full_name: fullName } }
-      });
-      if (error) alert(error.message);
-      else alert("Usuario creado. Inicia sesión.");
+      if (!fullName) { alert("Nombre requerido"); setLoading(false); return; }
+      const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
+      if (error) alert(error.message); else alert("Creado. Inicia sesión.");
     }
     setLoading(false);
   }
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-  }
-
-  // 3. DATOS
-  async function fetchTransactions() {
-    const { data } = await supabase
-      .from('transactions')
-      .select('*')
-      .order('date', { ascending: false });
-    if (data) setAllTransactions(data);
-  }
-
-  async function handleAdd() {
-    if (!newItem.name || !newItem.amount || !session) return;
-    
-    const { error } = await supabase.from('transactions').insert([{ 
-      user_id: session.user.id,
-      name: newItem.name, 
-      amount: parseFloat(newItem.amount), 
-      type: newItem.type, 
-      category: newItem.category,
-      date: new Date(newItem.date).toISOString() 
-    }]);
-
-    if (!error) {
-      setNewItem({ ...newItem, name: '', amount: '' });
-      setShowForm(false);
-      fetchTransactions();
-    } else {
-      alert(error.message);
-    }
-  }
-
-  async function handleClearDatabase() {
-    if(!confirm("¿Borrar TUS datos?")) return;
-    const { error } = await supabase.from('transactions').delete().neq('id', 0);
-    if (!error) setAllTransactions([]);
-  }
-
-  // --- CÁLCULOS ---
+  // --- CÁLCULOS GENERALES ---
   const currentMonthTransactions = allTransactions.filter(t => {
     const d = new Date(t.date);
     return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
@@ -158,293 +147,264 @@ export default function Dashboard() {
   const totalExpenses = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const netIncome = income - totalExpenses;
 
+  // Saldo Inicial
   const startBalance = pastTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0) -
                        pastTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-  const currentBalance = startBalance + netIncome;
 
-  // Calculamos datos SOLO para lo que queremos mostrar en gráficas (excluyendo Nómina)
+  // --- CÁLCULO STEAM (CON FEE 15%) ---
+  // Valor Bruto = Cantidad * Precio
+  // Valor Neto = Valor Bruto * 0.85
+  const steamTotalValue = steamItems.reduce((acc, item) => acc + (item.quantity * item.current_price), 0);
+  const steamNetValue = steamTotalValue * 0.85; // Restamos el 15% de comisión
+
+  // Saldo Total (Dinero + Valor Neto de Cajas)
+  const currentBalance = startBalance + netIncome; // Dinero liquido
+  const netWorth = currentBalance + steamNetValue; // Patrimonio total (Liquido + Cajas)
+
+  // Datos Gráficas
   const categoryData = DISPLAY_CATEGORIES.map(cat => {
     let value = 0;
-    
     if (cat === 'Inversiones' || cat === 'Ahorro') {
-        // Metas: Sumamos todo
-        value = currentMonthTransactions
-            .filter(t => t.category === cat)
-            .reduce((acc, t) => acc + t.amount, 0);
+        value = currentMonthTransactions.filter(t => t.category === cat).reduce((acc, t) => acc + t.amount, 0);
     } else {
-        // Gastos: Sumamos solo gastos
-        value = currentMonthTransactions
-            .filter(t => t.type === 'expense' && t.category === cat)
-            .reduce((acc, t) => acc + t.amount, 0);
+        value = currentMonthTransactions.filter(t => t.type === 'expense' && t.category === cat).reduce((acc, t) => acc + t.amount, 0);
     }
-
     return { name: cat, value };
   });
-
   const donutData = categoryData.filter(c => c.value > 0);
+
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
+  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
 
   // --- VISTA LOGIN ---
-  if (!session) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4 font-sans" style={{ backgroundColor: THEME.bg }}>
+  if (!session) return (
+    <div className="min-h-screen flex items-center justify-center p-4 font-sans" style={{ backgroundColor: THEME.bg }}>
         <div className="bg-[#161b22] p-8 rounded-2xl border border-slate-800 w-full max-w-sm shadow-2xl">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-white mb-2">Finanzas Personales</h1>
-            <p className="text-slate-400 text-sm">Control total, usuario único.</p>
-          </div>
+          <h1 className="text-3xl font-bold text-white mb-2 text-center">Finanzas Personales</h1>
           <div className="space-y-4">
-            {authMode === 'register' && (
-                <div>
-                    <label className="text-xs text-slate-500 mb-1 block">Nombre</label>
-                    <input type="text" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white focus:border-emerald-500 outline-none"
-                        placeholder="Ej: Juan Pérez" value={fullName} onChange={e => setFullName(e.target.value)} />
-                </div>
-            )}
-            <div>
-                <label className="text-xs text-slate-500 mb-1 block">Email</label>
-                <input type="email" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white focus:border-emerald-500 outline-none"
-                    placeholder="tu@email.com" value={email} onChange={e => setEmail(e.target.value)} />
-            </div>
-            <div>
-                <label className="text-xs text-slate-500 mb-1 block">Contraseña</label>
-                <input type="password" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white focus:border-emerald-500 outline-none"
-                    placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} />
-            </div>
-            <button onClick={handleAuth} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-all mt-4">
-                {loading ? 'Cargando...' : (authMode === 'login' ? 'Entrar' : 'Registrarse')}
-            </button>
-            <div className="text-center mt-4">
-                <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setFullName(''); }} className="text-slate-400 text-sm hover:text-white underline">
-                    {authMode === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia Sesión'}
-                </button>
-            </div>
+            {authMode === 'register' && <input type="text" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white" placeholder="Nombre" value={fullName} onChange={e => setFullName(e.target.value)} />}
+            <input type="email" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+            <input type="password" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} />
+            <button onClick={handleAuth} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg">{authMode === 'login' ? 'Entrar' : 'Registrarse'}</button>
+            <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-slate-400 text-sm hover:text-white underline">{authMode === 'login' ? '¿Crear cuenta?' : '¿Iniciar Sesión?'}</button>
           </div>
         </div>
-      </div>
-    );
-  }
+    </div>
+  );
 
-  const userName = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
-
-  // --- VISTA DASHBOARD ---
   return (
     <div className="min-h-screen p-4 md:p-6 font-sans text-white relative" style={{ backgroundColor: THEME.bg }}>
       
       {/* Botones Flotantes */}
-      <button 
-        onClick={() => {
+      <button onClick={() => {
             const today = new Date();
-            let defaultDate = new Date(currentYear, currentMonthIndex, 1);
-            if(today.getMonth() === currentMonthIndex && today.getFullYear() === currentYear) defaultDate = today;
-            const offset = defaultDate.getTimezoneOffset();
-            const adjustedDate = new Date(defaultDate.getTime() - (offset*60*1000));
-            setNewItem({...newItem, date: adjustedDate.toISOString().split('T')[0]});
+            let d = new Date(currentYear, currentMonthIndex, 1);
+            if(today.getMonth() === currentMonthIndex && today.getFullYear() === currentYear) d = today;
+            const offset = d.getTimezoneOffset();
+            const adj = new Date(d.getTime() - (offset*60*1000));
+            setNewItem({...newItem, date: adj.toISOString().split('T')[0]});
             setShowForm(true);
         }}
-        className="fixed bottom-8 right-8 z-50 bg-emerald-500 hover:bg-emerald-400 text-black font-bold p-4 rounded-full shadow-2xl transition-all hover:scale-110"
-      >
-        <Plus size={24} />
+        className="fixed bottom-8 right-8 z-50 bg-emerald-500 hover:bg-emerald-400 text-black font-bold p-4 rounded-full shadow-2xl hover:scale-110 transition-all"><Plus size={24} />
       </button>
+      <button onClick={handleLogout} className="fixed top-6 right-6 z-50 bg-[#161b22] p-2 rounded-lg border border-slate-800 flex gap-2 text-sm text-slate-400 hover:text-white"><LogOut size={16} /> Salir</button>
 
-      <button onClick={handleLogout} className="fixed top-6 right-6 z-50 bg-[#161b22] hover:bg-rose-900/30 text-slate-400 hover:text-rose-400 p-2 rounded-lg border border-slate-800 transition-all flex gap-2 items-center text-sm">
-        <LogOut size={16} /> Salir
-      </button>
-      <button onClick={handleClearDatabase} className="fixed bottom-8 left-8 z-50 bg-rose-900/50 hover:bg-rose-600 text-rose-200 hover:text-white p-3 rounded-full shadow-lg border border-rose-800">
-        <Trash2 size={20} />
-      </button>
-
-      {/* Modal Formulario */}
+      {/* MODAL TRANSACCION */}
       {showForm && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
           <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-xl">Añadir Movimiento</h3>
-              <button onClick={() => setShowForm(false)}><X className="text-slate-400 hover:text-white"/></button>
-            </div>
+            <div className="flex justify-between mb-4"><h3 className="font-bold">Añadir Movimiento</h3><button onClick={() => setShowForm(false)}><X/></button></div>
             <div className="space-y-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-slate-400">Fecha</label>
-                <input type="date" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white"
-                  value={newItem.date} onChange={e => setNewItem({...newItem, date: e.target.value})} />
-              </div>
-              <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Concepto" 
-                value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}/>
-              <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Cantidad" 
-                value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}/>
+              <input type="date" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.date} onChange={e => setNewItem({...newItem, date: e.target.value})} />
+              <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Concepto" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}/>
+              <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Cantidad" value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}/>
               <div className="grid grid-cols-2 gap-2">
-                <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.type} onChange={e => setNewItem({...newItem, type: e.target.value})}>
-                  <option value="expense">Gasto (-)</option>
-                  <option value="income">Ingreso (+)</option>
-                </select>
-                <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.type} onChange={e => setNewItem({...newItem, type: e.target.value})}><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
+                <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select>
               </div>
-              <button onClick={handleAdd} className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3 rounded-lg flex justify-center gap-2">
-                <Save size={20}/> Guardar
-              </button>
+              <button onClick={handleAdd} className="w-full bg-emerald-500 text-black font-bold py-3 rounded-lg"><Save className="inline mr-2" size={18}/> Guardar</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* GRID PRINCIPAL */}
-      <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-4">
+      {/* MODAL STEAM */}
+      {showSteamForm && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700">
+            <div className="flex justify-between mb-4"><h3 className="font-bold text-sky-400">Añadir Caja CS</h3><button onClick={() => setShowSteamForm(false)}><X/></button></div>
+            <div className="space-y-4">
+              <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Nombre (ej: Revolution Case)" value={newSteamItem.name} onChange={e => setNewSteamItem({...newSteamItem, name: e.target.value})}/>
+              <div className="grid grid-cols-2 gap-2">
+                <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Cantidad" value={newSteamItem.quantity} onChange={e => setNewSteamItem({...newSteamItem, quantity: e.target.value})}/>
+                <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Precio Unidad (€)" value={newSteamItem.price} onChange={e => setNewSteamItem({...newSteamItem, price: e.target.value})}/>
+              </div>
+              <p className="text-xs text-slate-400">* Se aplicará automáticamente el -15% de comisión de Steam.</p>
+              <button onClick={handleAddSteam} className="w-full bg-sky-500 text-black font-bold py-3 rounded-lg"><Gamepad2 className="inline mr-2" size={18}/> Guardar en Cartera</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LAYOUT PRINCIPAL */}
+      <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-6">
         
-        {/* COLUMNA IZQUIERDA */}
+        {/* HEADER BIENVENIDA (Full Width) */}
+        <div className="md:col-span-12 bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+             <div className="flex items-center gap-4">
+                <div className="bg-slate-800 p-3 rounded-full"><User className="text-emerald-400" size={24} /></div>
+                <div><p className="text-slate-400 text-xs uppercase tracking-wider">Bienvenido</p><h2 className="text-lg font-bold text-white">{userName}</h2></div>
+             </div>
+             <div className="text-right hidden md:block">
+                 <p className="text-slate-400 text-xs">Patrimonio Total (Net Worth)</p>
+                 <h2 className="text-2xl font-bold text-emerald-400">{formatEuro(netWorth)}</h2>
+             </div>
+        </div>
+
+        {/* COLUMNA 1: SALDOS Y NAVEGACIÓN */}
         <div className="md:col-span-3 space-y-4">
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center relative group select-none">
              <button onClick={goToPrevMonth} className="absolute left-2 top-1/2 -translate-y-1/2 p-2 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition"><ChevronLeft size={24} /></button>
              <button onClick={goToNextMonth} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition"><ChevronRight size={24} /></button>
              <h1 className="text-3xl font-light text-white cursor-pointer" onClick={goToToday}>{currentMonthName}</h1>
-             <p className="text-slate-500 text-xs uppercase tracking-widest mt-1">- {currentYear} Dashboard -</p>
+             <p className="text-slate-500 text-xs uppercase tracking-widest mt-1">- {currentYear} -</p>
           </div>
+          
           <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
-             <span className="text-slate-400 text-xs">Saldo Inicial (Ant.)</span>
-             <span className="text-white font-mono">{formatEuro(startBalance)}</span>
+             <span className="text-slate-400 text-xs">Saldo Líquido</span>
+             <span className="text-white font-mono font-bold">{formatEuro(currentBalance)}</span>
           </div>
-          <div className="bg-[#161b22] px-4 py-3 rounded-xl border border-slate-800 text-center">
-             {new Date().getMonth() === currentMonthIndex && new Date().getFullYear() === currentYear ? (
-                 <span className="text-emerald-400 text-xs font-bold flex items-center justify-center gap-2"><span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span> Mes En curso</span>
-             ) : (
-                 <span className="text-slate-400 text-xs font-bold flex items-center justify-center gap-2"><Calendar size={12}/> Visualizando Historial</span>
-             )}
-          </div>
-          <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center relative overflow-hidden">
-             <div className="absolute bottom-0 left-0 w-full h-1 bg-emerald-500"></div>
-             <p className="text-slate-400 text-xs mb-2">Saldo Final {currentMonthName}</p>
-             <h2 className="text-2xl font-bold text-white">{formatEuro(currentBalance)}</h2>
+
+          <div className="bg-gradient-to-br from-[#161b22] to-slate-900 p-4 rounded-xl border border-slate-800 relative overflow-hidden">
+             <div className="absolute top-0 right-0 p-2 opacity-10"><Gamepad2 size={64}/></div>
+             <p className="text-sky-400 text-xs font-bold mb-1">Valor Cajas Steam (Neto)</p>
+             <h2 className="text-2xl font-bold text-white mb-1">{formatEuro(steamNetValue)}</h2>
+             <p className="text-[10px] text-slate-500">Ya descontado el 15% de comisión</p>
           </div>
         </div>
 
-        {/* CONTENIDO CENTRAL */}
-        <div className="md:col-span-6 flex flex-col gap-4">
-            <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex items-center gap-4">
-                <div className="bg-slate-800 p-3 rounded-full"><User className="text-emerald-400" size={24} /></div>
-                <div><p className="text-slate-400 text-xs uppercase tracking-wider">Panel de Control</p><h2 className="text-lg font-bold text-white">Bienvenido, {userName}</h2></div>
-            </div>
+        {/* COLUMNA 2: GRÁFICAS Y STEAM */}
+        <div className="md:col-span-5 flex flex-col gap-4">
+            
+            {/* Tarjetas Ingreso/Gasto */}
             <div className="grid grid-cols-2 gap-4">
-                <div className="bg-[#161b22] px-4 py-5 rounded-xl border border-slate-800 flex flex-col justify-between h-32 relative overflow-hidden">
+                <div className="bg-[#161b22] px-4 py-5 rounded-xl border border-slate-800 flex flex-col justify-between h-28 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
-                    <div><h3 className="text-emerald-400 text-sm font-medium">Ingresos</h3><h2 className="text-2xl font-bold text-white mt-1">{formatEuro(income)}</h2></div>
-                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2"><div className="bg-emerald-500 h-full" style={{width: `${Math.min((income/2500)*100, 100)}%`}}></div></div>
+                    <div><h3 className="text-emerald-400 text-xs font-medium uppercase">Ingresos Mes</h3><h2 className="text-2xl font-bold text-white mt-1">{formatEuro(income)}</h2></div>
                 </div>
-                <div className="bg-[#161b22] px-4 py-5 rounded-xl border border-slate-800 flex flex-col justify-between h-32 relative overflow-hidden">
+                <div className="bg-[#161b22] px-4 py-5 rounded-xl border border-slate-800 flex flex-col justify-between h-28 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div>
-                    <div><h3 className="text-rose-500 text-sm font-medium">Gastos</h3><h2 className="text-2xl font-bold text-white mt-1">{formatEuro(totalExpenses)}</h2></div>
-                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2"><div className="bg-rose-500 h-full" style={{width: `${Math.min((totalExpenses/2000)*100, 100)}%`}}></div></div>
+                    <div><h3 className="text-rose-500 text-xs font-medium uppercase">Gastos Mes</h3><h2 className="text-2xl font-bold text-white mt-1">{formatEuro(totalExpenses)}</h2></div>
                 </div>
             </div>
-            <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 flex flex-col justify-center gap-6">
-                <div>
-                    <div className="flex justify-center gap-4 text-xs mb-2">
-                    <span className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500"></div> Ingresos</span>
-                    <span className="flex items-center gap-1"><div className="w-2 h-2 bg-rose-500"></div> Gastos</span>
-                    </div>
-                    <div className="w-full h-4 bg-slate-800 rounded-full flex overflow-hidden">
-                        <div className="h-full bg-emerald-500" style={{width: '55%'}}></div>
-                        <div className="h-full bg-rose-500" style={{width: '45%'}}></div>
-                    </div>
+
+            {/* SECCIÓN STEAM */}
+            <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-white flex items-center gap-2"><Gamepad2 className="text-sky-400" size={20}/> Cartera Steam</h3>
+                    <button onClick={() => setShowSteamForm(true)} className="text-xs bg-sky-500/10 text-sky-400 px-2 py-1 rounded hover:bg-sky-500/20">+ Añadir Caja</button>
                 </div>
-                <div>
-                    <div className="w-full h-8 bg-slate-800 rounded flex overflow-hidden">
-                        {categoryData.map((cat, i) => {
-                             // Buscamos el color original
-                             const originalIndex = CATEGORIES.indexOf(cat.name);
-                             const color = COLORS[originalIndex];
-                             
-                             return (
-                                <div key={i} style={{ width: `${(cat.value / (totalExpenses || 1)) * 100}%`, backgroundColor: color }} 
-                                    className="h-full flex items-center justify-center text-[10px] font-bold text-black/70 hover:opacity-80 transition-opacity"
-                                    title={cat.name}>
-                                    {cat.value > 0 && `${((cat.value/totalExpenses)*100).toFixed(0)}%`}
+                {steamItems.length === 0 ? (
+                    <p className="text-xs text-slate-500 text-center py-4">No tienes inversiones en Counter Strike.</p>
+                ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                        {steamItems.map(item => (
+                            <div key={item.id} className="flex justify-between items-center bg-[#0d1117] p-2 rounded border border-slate-800/50 group">
+                                <div>
+                                    <p className="text-sm text-white font-medium">{item.item_name}</p>
+                                    <p className="text-[10px] text-slate-500">{item.quantity} x {formatEuro(item.current_price)}</p>
                                 </div>
-                             )
-                        })}
+                                <div className="text-right flex items-center gap-3">
+                                    <div>
+                                        <p className="text-sm font-bold text-sky-400">{formatEuro(item.quantity * item.current_price * 0.85)}</p>
+                                        <p className="text-[10px] text-slate-600">Neto (-15%)</p>
+                                    </div>
+                                    <button onClick={() => handleDeleteSteam(item.id)} className="text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={14}/></button>
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                </div>
+                )}
             </div>
         </div>
 
-        {/* COLUMNA DERECHA */}
-        <div className="md:col-span-3 flex flex-col gap-4">
-            <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
-                <p className="text-slate-400 text-sm">Balance Neto</p>
-                <h2 className={`text-2xl font-bold mt-2 ${netIncome >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                    {formatEuro(netIncome)}
-                </h2>
-            </div>
-            <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 flex flex-col items-center justify-center">
-                <h3 className="text-slate-300 text-sm mb-4">Desglose {currentMonthName}</h3>
-                <div className="w-full h-48 relative">
-                        {totalExpenses > 0 ? (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie data={donutData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={2} dataKey="value" stroke="none">
-                                        {donutData.map((entry, index) => {
-                                            const originalIndex = CATEGORIES.indexOf(entry.name);
-                                            return <Cell key={`cell-${index}`} fill={COLORS[originalIndex]} />
-                                        })}
-                                    </Pie>
-                                    <RechartsTooltip formatter={(value: number) => formatEuro(value)} contentStyle={{backgroundColor: '#0d1117', border:'none'}} itemStyle={{color:'#fff'}} />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        ) : <p className="text-xs text-slate-600 flex h-full items-center justify-center">Sin gastos</p>}
+        {/* COLUMNA 3: HISTORIAL (Ocupa el hueco derecho) */}
+        <div className="md:col-span-4 bg-[#161b22] rounded-xl border border-slate-800 p-4 flex flex-col h-full max-h-[500px]">
+            <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Calendar className="text-slate-400" size={18}/> Historial {currentMonthName}</h3>
+            {currentMonthTransactions.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center text-slate-600 text-sm">No hay movimientos este mes.</div>
+            ) : (
+                <div className="overflow-y-auto flex-1 pr-2 space-y-2 custom-scrollbar">
+                    {currentMonthTransactions.map(t => (
+                        <div key={t.id} className="flex justify-between items-center p-3 rounded-lg bg-[#0d1117] border border-slate-800/50 group hover:border-slate-700 transition">
+                            <div>
+                                <p className="text-white font-medium text-sm">{t.name}</p>
+                                <p className="text-[10px] text-slate-500">{new Date(t.date).toLocaleDateString()} • {t.category}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className={`font-bold text-sm ${t.type==='income'?'text-emerald-400':'text-rose-500'}`}>
+                                    {t.type==='income'?'+':'-'}{formatEuro(t.amount)}
+                                </span>
+                                <button onClick={() => handleDelete(t.id)} className="text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
-                   {DISPLAY_CATEGORIES.map((cat, i) => {
-                       const originalIndex = CATEGORIES.indexOf(cat);
-                       return (
-                           <div key={i} className="flex items-center gap-2 text-[10px] text-slate-400">
-                               <div className="w-2 h-2 rounded-full" style={{backgroundColor: COLORS[originalIndex]}}></div>
-                               {cat}
-                           </div>
-                       )
-                   })}
-               </div>
-            </div>
+            )}
         </div>
 
-        {/* FILA INFERIOR (Solo DISPLAY_CATEGORIES) */}
-        <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-5 gap-4 mt-2">
-            {DISPLAY_CATEGORIES.map((cat) => {
-                const total = categoryData.find(c => c.name === cat)?.value || 0;
-                const originalIndex = CATEGORIES.indexOf(cat);
-                const color = COLORS[originalIndex];
-                
-                const pieData = [{ name: 'Usado', value: total || 1 }, { name: 'Restante', value: (BUDGETS[cat] - total) > 0 ? (BUDGETS[cat] - total) : 0 }];
-                const pct = Math.min((total / BUDGETS[cat]) * 100, 100);
+        {/* FILA INFERIOR: PRESUPUESTOS (CORREGIDOS) */}
+        <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-5 gap-4">
+            {DISPLAY_CATEGORIES.map((cat, index) => {
+                const totalUsed = categoryData.find(c => c.name === cat)?.value || 0;
+                const limit = BUDGETS[cat] || 1000;
+                const remaining = limit - totalUsed;
+                const pct = Math.min((totalUsed / limit) * 100, 100);
+                const color = COLORS[index + 1]; // +1 porque el 0 es Nómina y esa no sale aquí
+
+                const pieData = [
+                    { name: 'Gastado', value: totalUsed || 1 }, 
+                    { name: 'Restante', value: remaining > 0 ? remaining : 0 }
+                ];
                 
                 return (
-                    <div key={cat} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden group">
+                    <div key={cat} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: color}}></div>
-                        <h3 className="text-sm font-bold mb-1" style={{color: color}}>{cat}</h3>
-                        <h2 className="text-xl font-bold text-white mb-4">{formatEuro(total)}</h2>
-                        <div className="w-24 h-24 relative mb-4">
+                        <h3 className="text-xs font-bold mb-1 uppercase tracking-wide" style={{color: color}}>{cat}</h3>
+                        
+                        {/* Gráfica */}
+                        <div className="w-20 h-20 relative mb-2">
                              <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
-                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={30} outerRadius={38} startAngle={90} endAngle={-270} dataKey="value" stroke="none">
+                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={25} outerRadius={32} startAngle={90} endAngle={-270} dataKey="value" stroke="none">
                                         <Cell fill={color} /> <Cell fill="#30363d" />
                                     </Pie>
                                 </PieChart>
                              </ResponsiveContainer>
-                             <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                 <span className="text-[10px] text-slate-400">
-                                     % Objetivo
-                                 </span>
-                                 <span className="text-xs font-bold text-white">{((total/(cat === 'Nómina' ? BUDGETS[cat] : (income || 1)))*100).toFixed(0)}%</span>
+                             <div className="absolute inset-0 flex items-center justify-center">
+                                 <span className="text-[10px] font-bold text-white">{pct.toFixed(0)}%</span>
                              </div>
                         </div>
-                        <div className="w-full space-y-2 mt-auto">
-                            <div className="flex justify-between text-[10px] text-slate-400"><span>Progreso</span><span>{pct.toFixed(0)}%</span></div>
-                            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-1000" style={{ width: `${pct}%`, backgroundColor: color }}></div></div>
+
+                        {/* Texto explícito: Gastado / Límite */}
+                        <div className="text-center w-full">
+                            <p className="text-lg font-bold text-white">{formatEuro(totalUsed)}</p>
+                            <p className="text-[10px] text-slate-500 border-t border-slate-700 pt-1 mt-1">
+                                Límite: <span className="text-slate-300">{formatEuro(limit)}</span>
+                            </p>
                         </div>
                     </div>
                 )
             })}
         </div>
       </div>
+      
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #0d1117; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #58a6ff; }
+      `}</style>
     </div>
   );
 }
