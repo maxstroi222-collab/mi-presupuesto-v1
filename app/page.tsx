@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Plus, Save, X, History, ArrowLeft, Calendar } from 'lucide-react';
+import { Plus, Save, X, History, ArrowLeft, Calendar, Trash2 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, 
 } from 'recharts';
@@ -10,49 +10,45 @@ import {
 export default function Dashboard() {
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [viewMode, setViewMode] = useState<'current' | 'history'>('current'); // Controla si vemos el mes o el historial
+  const [viewMode, setViewMode] = useState<'current' | 'history'>('current');
   
-  // --- CONFIGURACIÓN DE FECHAS ---
+  // Fecha actual del sistema
   const now = new Date();
   const currentMonthIndex = now.getMonth();
   const currentYear = now.getFullYear();
   
-  // Formateador de moneda Euro
   const formatEuro = (amount: number) => {
     return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   };
 
-  // Capitalizar primera letra (ej: febrero -> Febrero)
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const currentMonthName = capitalize(now.toLocaleString('es-ES', { month: 'long' }));
 
-  // --- TEMAS Y CATEGORÍAS ---
   const THEME = {
     bg: '#0d1117',        
     card: '#161b22',      
     text: '#ffffff',
     textDim: '#8b949e',
-    variable: '#f43f5e',   // Rosa
-    facturas: '#fbbf24',   // Amarillo
-    deuda: '#3b82f6',      // Azul
-    inversiones: '#8b5cf6',// Morado
-    ahorro: '#10b981',     // Verde
+    variable: '#f43f5e',
+    facturas: '#fbbf24',
+    deuda: '#3b82f6',
+    inversiones: '#8b5cf6',
+    ahorro: '#10b981',
   };
 
-  // Nombres traducidos
   const CATEGORIES = ['Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
   
-  // Presupuestos ficticios (en el futuro los haremos editables)
   const BUDGETS: any = { 
-    'Variable': 1200, 
-    'Facturas': 800, 
-    'Deuda': 500, 
-    'Inversiones': 300, 
-    'Ahorro': 200 
+    'Variable': 1200, 'Facturas': 800, 'Deuda': 500, 'Inversiones': 300, 'Ahorro': 200 
   };
 
+  // Estado del formulario (Ahora incluye FECHA)
   const [newItem, setNewItem] = useState({ 
-    name: '', amount: '', type: 'expense', category: 'Variable' 
+    name: '', 
+    amount: '', 
+    type: 'expense', 
+    category: 'Variable',
+    date: new Date().toISOString().split('T')[0] // Por defecto hoy (formato YYYY-MM-DD)
   });
 
   useEffect(() => {
@@ -60,38 +56,57 @@ export default function Dashboard() {
   }, []);
 
   async function fetchTransactions() {
-    // Traemos TODO para poder calcular el histórico
     const { data } = await supabase
       .from('transactions')
       .select('*')
-      .order('date', { ascending: false }); // Asegúrate de usar 'date' o 'created_at'
+      .order('date', { ascending: false });
     if (data) setAllTransactions(data);
   }
 
   async function handleAdd() {
-    if (!newItem.name || !newItem.amount) return;
+    if (!newItem.name || !newItem.amount || !newItem.date) return;
     
-    // Insertamos usando la fecha actual automáticamente
+    // Guardamos con la fecha que el usuario eligió
     const { error } = await supabase.from('transactions').insert([{ 
       name: newItem.name, 
       amount: parseFloat(newItem.amount), 
       type: newItem.type, 
       category: newItem.category,
-      date: new Date().toISOString() // Guardamos la fecha exacta
+      date: new Date(newItem.date).toISOString() 
     }]);
 
     if (!error) {
-      setNewItem({ name: '', amount: '', type: 'expense', category: 'Variable' });
+      // Resetear formulario (manteniendo fecha de hoy)
+      setNewItem({ 
+        name: '', 
+        amount: '', 
+        type: 'expense', 
+        category: 'Variable',
+        date: new Date().toISOString().split('T')[0] 
+      });
       setShowForm(false);
       fetchTransactions();
     } else {
-      alert("Error al guardar: " + error.message);
+      alert("Error: " + error.message);
     }
   }
 
-  // --- LÓGICA DE FILTRADO (MAGIA DE FECHAS) ---
-  
-  // 1. Separar transacciones de ESTE MES vs PASADAS
+  // --- FUNCIÓN PARA BORRAR TODO (TESTING) ---
+  async function handleClearDatabase() {
+    if(!confirm("¿ESTÁS SEGURO? Esto borrará TODOS los datos para siempre.")) return;
+    
+    // Borramos todas las filas que tengan ID mayor que 0 (todas)
+    const { error } = await supabase.from('transactions').delete().gt('id', 0);
+    
+    if (!error) {
+        setAllTransactions([]);
+        alert("Base de datos limpiada.");
+    } else {
+        alert("Error al borrar: " + error.message);
+    }
+  }
+
+  // --- LÓGICA DE FILTRADO ---
   const currentMonthTransactions = allTransactions.filter(t => {
     const d = new Date(t.date || t.created_at);
     return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
@@ -99,23 +114,19 @@ export default function Dashboard() {
 
   const pastTransactions = allTransactions.filter(t => {
     const d = new Date(t.date || t.created_at);
-    // Es pasado si el año es menor, o si es el mismo año pero mes menor
     return d.getFullYear() < currentYear || (d.getFullYear() === currentYear && d.getMonth() < currentMonthIndex);
   });
 
-  // 2. Calcular datos de ESTE MES
   const income = currentMonthTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
   const totalExpenses = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const netIncome = income - totalExpenses;
 
-  // 3. Calcular SALDO INICIAL (Ahorro acumulado de meses anteriores)
   const pastIncome = pastTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
   const pastExpenses = pastTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-  const startBalance = pastIncome - pastExpenses; // Lo que te sobró de la historia
+  const startBalance = pastIncome - pastExpenses;
 
-  const currentBalance = startBalance + netIncome; // Lo que tienes hoy en total
+  const currentBalance = startBalance + netIncome;
 
-  // Datos para gráficos
   const categoryData = CATEGORIES.map(cat => {
     const value = currentMonthTransactions
       .filter(t => t.type === 'expense' && t.category === cat)
@@ -127,9 +138,9 @@ export default function Dashboard() {
   const COLORS = [THEME.variable, THEME.facturas, THEME.deuda, THEME.inversiones, THEME.ahorro];
 
   return (
-    <div className="min-h-screen p-4 md:p-6 font-sans text-white" style={{ backgroundColor: THEME.bg }}>
+    <div className="min-h-screen p-4 md:p-6 font-sans text-white relative" style={{ backgroundColor: THEME.bg }}>
       
-      {/* Botón flotante (+) */}
+      {/* Botón (+) */}
       {viewMode === 'current' && (
         <button 
           onClick={() => setShowForm(true)}
@@ -138,6 +149,15 @@ export default function Dashboard() {
           <Plus size={24} />
         </button>
       )}
+
+      {/* Botón RESET DB (Esquina inferior izquierda) */}
+      <button 
+        onClick={handleClearDatabase}
+        className="fixed bottom-8 left-8 z-50 bg-rose-900/50 hover:bg-rose-600 text-rose-200 hover:text-white p-3 rounded-full shadow-lg transition-all border border-rose-800"
+        title="Borrar toda la base de datos (Testing)"
+      >
+        <Trash2 size={20} />
+      </button>
 
       {/* MODAL FORMULARIO */}
       {showForm && (
@@ -148,9 +168,20 @@ export default function Dashboard() {
               <button onClick={() => setShowForm(false)}><X className="text-slate-400 hover:text-white"/></button>
             </div>
             <div className="space-y-4">
+              {/* CAMPO FECHA AÑADIDO */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-400">Fecha</label>
+                <input 
+                  type="date" 
+                  className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white"
+                  value={newItem.date} 
+                  onChange={e => setNewItem({...newItem, date: e.target.value})}
+                />
+              </div>
+
               <input 
                 className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" 
-                placeholder="Concepto" 
+                placeholder="Concepto (ej: Mercadona)" 
                 value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}
               />
               <input 
@@ -184,22 +215,18 @@ export default function Dashboard() {
       {/* --- GRID PRINCIPAL --- */}
       <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-4">
         
-        {/* COLUMNA IZQUIERDA (Estática) */}
+        {/* COLUMNA IZQUIERDA */}
         <div className="md:col-span-3 space-y-4">
-          
-          {/* HEADER DEL MES */}
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
              <h1 className="text-3xl font-light text-white">{viewMode === 'current' ? currentMonthName : 'Historial'}</h1>
              <p className="text-slate-500 text-xs uppercase tracking-widest mt-1">- {currentYear} Dashboard -</p>
           </div>
           
-          {/* SALDO INICIAL (Lo que traes de meses anteriores) */}
           <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
-             <span className="text-slate-400 text-xs">Saldo Inicial (Ant.)</span>
+             <span className="text-slate-400 text-xs">Saldo Inicial (Pasado)</span>
              <span className="text-white font-mono">{formatEuro(startBalance)}</span>
           </div>
           
-          {/* --- AQUÍ ESTÁ EL CAMBIO SOLICITADO (Botón Historial) --- */}
           <div 
              onClick={() => setViewMode(viewMode === 'current' ? 'history' : 'current')}
              className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center cursor-pointer hover:bg-[#1e2530] transition group relative overflow-hidden"
@@ -220,7 +247,6 @@ export default function Dashboard() {
              )}
           </div>
 
-          {/* SALDO ACTUAL TOTAL */}
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center relative overflow-hidden">
              <div className="absolute bottom-0 left-0 w-full h-1 bg-emerald-500"></div>
              <p className="text-slate-400 text-xs mb-2">Saldo Total Real</p>
@@ -228,14 +254,11 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* --- CONTENIDO CENTRAL (CAMBIA SEGÚN PESTAÑA) --- */}
-        
+        {/* --- CONTENIDO CENTRAL --- */}
         {viewMode === 'current' ? (
         <>
-            {/* VISTA DASHBOARD (MES ACTUAL) */}
             <div className="md:col-span-6 flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-4 h-full">
-                {/* Ingresos */}
                 <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
                     <h3 className="text-emerald-400 font-medium mb-1">Ingresos Totales</h3>
                     <h2 className="text-3xl font-bold text-white mb-4">{formatEuro(income)}</h2>
@@ -247,7 +270,6 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* Gastos */}
                 <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
                     <h3 className="text-rose-500 font-medium mb-1">Gastos Totales</h3>
                     <h2 className="text-3xl font-bold text-white mb-4">{formatEuro(totalExpenses)}</h2>
@@ -260,7 +282,6 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* Barras de Progreso General */}
             <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 flex flex-col justify-center gap-6">
                 <div>
                     <div className="flex justify-center gap-4 text-xs mb-2">
@@ -273,7 +294,6 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* Barra Multicolor */}
                 <div>
                     <div className="w-full h-8 bg-slate-800 rounded flex overflow-hidden">
                         {categoryData.map((cat, i) => (
@@ -295,7 +315,6 @@ export default function Dashboard() {
             </div>
             </div>
 
-            {/* Columna Derecha (Gráfico Donut) */}
             <div className="md:col-span-3 flex flex-col gap-4">
             <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
                 <p className="text-slate-400 text-sm">Balance Neto (Mes)</p>
@@ -343,7 +362,7 @@ export default function Dashboard() {
             </div>
             </div>
 
-            {/* FILA INFERIOR (CATEGORÍAS) */}
+            {/* FILA INFERIOR */}
             <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-5 gap-4 mt-2">
                 {CATEGORIES.map((cat, index) => {
                     const total = categoryData.find(c => c.name === cat)?.value || 0;
@@ -409,8 +428,8 @@ export default function Dashboard() {
             </div>
         </>
         ) : (
-        /* --- VISTA DE HISTORIAL --- */
-        <div className="md:col-span-9 bg-[#161b22] p-8 rounded-xl border border-slate-800">
+        /* VISTA DE HISTORIAL */
+        <div className="md:col-span-9 bg-[#161b22] p-8 rounded-xl border border-slate-800 min-h-[500px]">
             <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
                 <Calendar className="text-blue-500"/> Historial de Meses Anteriores
             </h2>
@@ -422,7 +441,6 @@ export default function Dashboard() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    {/* Aquí podríamos agrupar por mes, por ahora mostramos lista simple de pasados */}
                     <table className="w-full text-left text-slate-300">
                         <thead>
                             <tr className="border-b border-slate-700 text-slate-500 text-sm">
