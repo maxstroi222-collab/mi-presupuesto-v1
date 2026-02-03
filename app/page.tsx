@@ -35,15 +35,31 @@ export default function Dashboard() {
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const currentMonthName = capitalize(currentDate.toLocaleString('es-ES', { month: 'long' }));
 
-  // --- TEMA Y COLORES ---
+  // --- TEMA Y COLORES (AÑADIDA NÓMINA) ---
   const THEME = {
     bg: '#0d1117', card: '#161b22', text: '#ffffff',
-    variable: '#f43f5e', facturas: '#fbbf24', deuda: '#3b82f6',
-    inversiones: '#8b5cf6', ahorro: '#10b981',
+    nomina: '#0ea5e9',    // Azul Cielo (Nuevo)
+    variable: '#f43f5e',  // Rosa
+    facturas: '#fbbf24',  // Amarillo
+    deuda: '#3b82f6',     // Azul
+    inversiones: '#8b5cf6', // Morado
+    ahorro: '#10b981',    // Verde
   };
-  const CATEGORIES = ['Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
-  const BUDGETS: any = { 'Variable': 1200, 'Facturas': 800, 'Deuda': 500, 'Inversiones': 300, 'Ahorro': 200 };
-  const COLORS = [THEME.variable, THEME.facturas, THEME.deuda, THEME.inversiones, THEME.ahorro];
+
+  // AÑADIDA 'Nómina' AL PRINCIPIO DE LA LISTA
+  const CATEGORIES = ['Nómina', 'Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
+  
+  // OBJETIVOS (Para Nómina es "Cuánto espero ganar", para Gastos es "Límite")
+  const BUDGETS: any = { 
+    'Nómina': 2500,     // Meta de ingreso mensual
+    'Variable': 1200, 
+    'Facturas': 800, 
+    'Deuda': 500, 
+    'Inversiones': 300, 
+    'Ahorro': 200 
+  };
+  
+  const COLORS = [THEME.nomina, THEME.variable, THEME.facturas, THEME.deuda, THEME.inversiones, THEME.ahorro];
 
   const [newItem, setNewItem] = useState({ 
     name: '', amount: '', type: 'expense', category: 'Variable',
@@ -124,7 +140,7 @@ export default function Dashboard() {
     if (!error) setAllTransactions([]);
   }
 
-  // --- CÁLCULOS PRINCIPALES ---
+  // --- CÁLCULOS ---
   const currentMonthTransactions = allTransactions.filter(t => {
     const d = new Date(t.date);
     return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
@@ -143,20 +159,22 @@ export default function Dashboard() {
                        pastTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const currentBalance = startBalance + netIncome;
 
-  // --- LÓGICA DE CATEGORÍAS CORREGIDA ---
-  // Aquí es donde hacemos la magia: 
-  // - Si es Ahorro o Inversión: Sumamos TODO (Ingresos + Gastos) porque son metas de acumulación.
-  // - Si es Variable, Facturas, Deuda: Sumamos solo GASTOS porque son límites.
+  // --- LÓGICA DE CATEGORÍAS ACTUALIZADA ---
   const categoryData = CATEGORIES.map(cat => {
     let value = 0;
     
-    if (cat === 'Inversiones' || cat === 'Ahorro') {
-        // Para metas: Sumamos todo lo que tenga esa categoría (Ingresos Y Gastos)
+    if (cat === 'Nómina') {
+        // NÓMINA: Solo suma INGRESOS
+        value = currentMonthTransactions
+            .filter(t => t.type === 'income' && t.category === cat)
+            .reduce((acc, t) => acc + t.amount, 0);
+    } else if (cat === 'Inversiones' || cat === 'Ahorro') {
+        // METAS: Suma TODO (Ingresos + Gastos)
         value = currentMonthTransactions
             .filter(t => t.category === cat)
             .reduce((acc, t) => acc + t.amount, 0);
     } else {
-        // Para límites: Sumamos solo lo que sea Gasto
+        // GASTOS PUROS (Variable, Facturas, Deuda): Suma solo GASTOS
         value = currentMonthTransactions
             .filter(t => t.type === 'expense' && t.category === cat)
             .reduce((acc, t) => acc + t.amount, 0);
@@ -378,11 +396,12 @@ export default function Dashboard() {
             </div>
         </div>
 
-        {/* FILA INFERIOR */}
-        <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-5 gap-4 mt-2">
+        {/* FILA INFERIOR (AHORA CON 6 COLUMNAS SI HAY ESPACIO O GRID ADAPTATIVO) */}
+        <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mt-2">
             {CATEGORIES.map((cat, index) => {
                 const total = categoryData.find(c => c.name === cat)?.value || 0;
-                const pieData = [{ name: 'Usado', value: total || 1 }, { name: 'Restante', value: (BUDGETS[cat] - total) > 0 ? (BUDGETS[cat] - total) : 0 }];
+                // Si es Nómina (Ingreso), mostramos "Conseguido" vs "Meta". Si es Gasto, "Usado" vs "Restante"
+                const pieData = [{ name: 'Actual', value: total || 1 }, { name: 'Restante', value: (BUDGETS[cat] - total) > 0 ? (BUDGETS[cat] - total) : 0 }];
                 const pct = Math.min((total / BUDGETS[cat]) * 100, 100);
                 const color = COLORS[index];
                 return (
@@ -399,8 +418,10 @@ export default function Dashboard() {
                                 </PieChart>
                              </ResponsiveContainer>
                              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                 <span className="text-[10px] text-slate-400">% Objetivo</span>
-                                 <span className="text-xs font-bold text-white">{((total/(BUDGETS[cat] || 1))*100).toFixed(0)}%</span>
+                                 <span className="text-[10px] text-slate-400">
+                                     {cat === 'Nómina' ? '% Conseguido' : '% Usado'}
+                                 </span>
+                                 <span className="text-xs font-bold text-white">{((total/(cat === 'Nómina' ? BUDGETS[cat] : (income || 1)))*100).toFixed(0)}%</span>
                              </div>
                         </div>
                         <div className="w-full space-y-2 mt-auto">
