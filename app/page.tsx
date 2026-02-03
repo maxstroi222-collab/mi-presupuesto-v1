@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, Megaphone, AlertTriangle } from 'lucide-react';
+import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, Megaphone, AlertTriangle, Settings } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 
 export default function Dashboard() {
@@ -19,8 +19,17 @@ export default function Dashboard() {
   // --- ESTADOS DE DATOS ---
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [steamItems, setSteamItems] = useState<any[]>([]);
+  
+  // ESTADO DE PRESUPUESTOS (Dinámico)
+  const [budgets, setBudgets] = useState({
+    'Nómina': 2500, 'Variable': 1200, 'Facturas': 800, 
+    'Deuda': 500, 'Inversiones': 300, 'Ahorro': 200 
+  });
+
+  // MODALES
   const [showForm, setShowForm] = useState(false);
   const [showSteamForm, setShowSteamForm] = useState(false);
+  const [showBudgetSettings, setShowBudgetSettings] = useState(false); // Nuevo modal ajustes
   
   // ESTADOS ADMIN
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -54,11 +63,6 @@ export default function Dashboard() {
   const CATEGORIES = ['Nómina', 'Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
   const DISPLAY_CATEGORIES = ['Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
   
-  const BUDGETS: any = { 
-    'Nómina': 2500, 'Variable': 1200, 'Facturas': 800, 
-    'Deuda': 500, 'Inversiones': 300, 'Ahorro': 200 
-  };
-  
   const COLORS = [THEME.nomina, THEME.variable, THEME.facturas, THEME.deuda, THEME.inversiones, THEME.ahorro];
 
   const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: 'Variable', date: new Date().toISOString().split('T')[0] });
@@ -68,25 +72,64 @@ export default function Dashboard() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if(session) loadAllData();
+      if(session) loadAllData(session.user.id);
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if(session) loadAllData();
+      if(session) loadAllData(session.user.id);
       else { setAllTransactions([]); setSteamItems([]); }
     });
     
-    // Cargar alerta del sistema (independiente de la sesión)
     fetchSystemAlert();
-
     return () => subscription.unsubscribe();
   }, []);
 
-  async function loadAllData() {
+  async function loadAllData(userId: string) {
     fetchTransactions();
     fetchSteamPortfolio();
+    fetchUserBudgets(userId);
+  }
+
+  // --- LÓGICA PRESUPUESTOS ---
+  async function fetchUserBudgets(userId: string) {
+    const { data, error } = await supabase.from('user_budgets').select('*').eq('user_id', userId).single();
+    
+    if (data) {
+        // Mapear columnas DB a nuestro objeto de estado
+        setBudgets({
+            'Nómina': data.nomina,
+            'Variable': data.variable,
+            'Facturas': data.facturas,
+            'Deuda': data.deuda,
+            'Inversiones': data.inversiones,
+            'Ahorro': data.ahorro
+        });
+    } else {
+        // Si no existe fila, creamos una por defecto
+        const defaultBudgets = { user_id: userId, nomina: 2500, variable: 1200, facturas: 800, deuda: 500, inversiones: 300, ahorro: 200 };
+        await supabase.from('user_budgets').insert([defaultBudgets]);
+    }
+  }
+
+  async function handleSaveBudgets() {
+    if (!session) return;
+    const { error } = await supabase.from('user_budgets').upsert({
+        user_id: session.user.id,
+        nomina: budgets['Nómina'],
+        variable: budgets['Variable'],
+        facturas: budgets['Facturas'],
+        deuda: budgets['Deuda'],
+        inversiones: budgets['Inversiones'],
+        ahorro: budgets['Ahorro']
+    });
+
+    if (error) alert("Error guardando presupuestos: " + error.message);
+    else {
+        setShowBudgetSettings(false);
+        // No hace falta recargar, el estado local ya tiene los datos nuevos
+    }
   }
 
   // --- LÓGICA STEAM API ---
@@ -179,12 +222,12 @@ export default function Dashboard() {
     if (!error) fetchSteamPortfolio();
   }
 
-  // --- FUNCIONES ADMIN (ALERTAS) ---
+  // --- FUNCIONES ADMIN ---
   async function fetchSystemAlert() {
     const { data } = await supabase.from('system_config').select('*').eq('key_name', 'global_alert').single();
     if (data) {
         setSystemAlert({ message: data.value, active: data.is_active });
-        setAdminMessageInput(data.value); // Rellenar input del admin
+        setAdminMessageInput(data.value); 
     }
   }
 
@@ -194,14 +237,9 @@ export default function Dashboard() {
         .from('system_config')
         .update({ value: adminMessageInput, is_active: active })
         .eq('key_name', 'global_alert');
-    
-    if (error) alert("Error al guardar aviso: " + error.message);
-    else {
-        fetchSystemAlert();
-        alert(active ? "Aviso publicado" : "Aviso ocultado");
-    }
+    if (error) alert("Error: " + error.message);
+    else { fetchSystemAlert(); alert(active ? "Aviso publicado" : "Aviso ocultado"); }
   }
-
 
   async function handleLogout() { await supabase.auth.signOut(); }
   async function handleAuth() {
@@ -242,6 +280,7 @@ export default function Dashboard() {
   const currentBalance = startBalance + netIncome; 
   const netWorth = currentBalance + steamNetValue; 
 
+  // Usamos el estado 'budgets' en lugar de la constante
   const categoryData = DISPLAY_CATEGORIES.map(cat => {
     let value = 0;
     if (cat === 'Inversiones' || cat === 'Ahorro') {
@@ -251,7 +290,6 @@ export default function Dashboard() {
     }
     return { name: cat, value };
   });
-  const donutData = categoryData.filter(c => c.value > 0);
 
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
@@ -276,7 +314,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen font-sans text-white relative flex flex-col" style={{ backgroundColor: THEME.bg }}>
       
-      {/* --- BANNER DE AVISO GLOBAL (ANCLADO ARRIBA) --- */}
+      {/* BANNER AVISO */}
       {systemAlert.active && (
         <div className="w-full bg-amber-500/10 border-b border-amber-500/20 py-2 px-4 text-center">
             <p className="text-amber-400 text-sm font-bold flex items-center justify-center gap-2">
@@ -286,7 +324,8 @@ export default function Dashboard() {
       )}
 
       <div className="flex-1 p-4 md:p-6 relative">
-          {/* Botón Flotante + */}
+          
+          {/* BOTÓN + */}
           <button onClick={() => {
                 const today = new Date();
                 let d = new Date(currentYear, currentMonthIndex, 1);
@@ -299,14 +338,11 @@ export default function Dashboard() {
             className="fixed bottom-8 right-8 z-50 bg-emerald-500 hover:bg-emerald-400 text-black font-bold p-4 rounded-full shadow-2xl hover:scale-110 transition-all"><Plus size={24} />
           </button>
 
-          {/* ZONA INFERIOR IZQUIERDA: SALIR + ADMIN */}
+          {/* BOTONES SALIR + ADMIN */}
           <div className="fixed bottom-8 left-8 z-50 flex gap-3 items-center">
-              {/* Botón Salir */}
               <button onClick={handleLogout} className="bg-[#1e293b] hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-full shadow-xl border border-slate-600 flex items-center gap-2 transition-all">
                 <LogOut size={18} /> Salir
               </button>
-
-              {/* Botón Admin (SOLO ADMINS) */}
               {isAdmin && (
                   <button onClick={() => setShowAdminPanel(true)} className="bg-red-900/80 hover:bg-red-700 text-white p-3 rounded-full shadow-xl border border-red-500/50 transition-all" title="Panel de Administrador">
                     <Shield size={20} />
@@ -314,7 +350,41 @@ export default function Dashboard() {
               )}
           </div>
 
-          {/* MODAL PANEL DE ADMINISTRADOR */}
+          {/* MODAL CONFIGURACIÓN PRESUPUESTOS */}
+          {showBudgetSettings && (
+             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700">
+                    <div className="flex justify-between mb-4 border-b border-slate-700 pb-2">
+                        <h3 className="font-bold text-xl flex items-center gap-2"><Settings size={20}/> Ajustar Presupuestos</h3>
+                        <button onClick={() => setShowBudgetSettings(false)}><X className="text-slate-400 hover:text-white"/></button>
+                    </div>
+                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                        {CATEGORIES.map(cat => (
+                            <div key={cat} className="flex flex-col gap-1">
+                                <label className="text-xs text-slate-400 flex justify-between">
+                                    {cat} 
+                                    <span style={{color: COLORS[CATEGORIES.indexOf(cat)]}}>●</span>
+                                </label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
+                                    <input 
+                                        type="number" 
+                                        className="w-full bg-[#0f172a] border border-slate-600 rounded p-2 pl-7 text-white"
+                                        value={budgets[cat as keyof typeof budgets]}
+                                        onChange={(e) => setBudgets({...budgets, [cat]: parseFloat(e.target.value) || 0})}
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={handleSaveBudgets} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg mt-4 flex justify-center gap-2">
+                        <Save size={18}/> Guardar Cambios
+                    </button>
+                </div>
+             </div>
+          )}
+
+          {/* MODAL ADMIN */}
           {showAdminPanel && (
             <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4">
                <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-lg border border-red-500/30 shadow-2xl relative">
@@ -322,30 +392,13 @@ export default function Dashboard() {
                       <h3 className="font-bold text-xl text-red-400 flex items-center gap-2"><Shield size={24}/> Panel de Control</h3>
                       <button onClick={() => setShowAdminPanel(false)}><X className="hover:text-white text-slate-400"/></button>
                   </div>
-                  
-                  {/* Sección de Avisos */}
                   <div className="space-y-4">
                       <h4 className="text-white font-bold flex items-center gap-2"><Megaphone size={18} className="text-amber-400"/> Aviso Global</h4>
-                      <p className="text-xs text-slate-400">Este mensaje aparecerá anclado en la parte superior de la web para TODOS los usuarios.</p>
-                      
-                      <textarea 
-                         className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white h-24 resize-none"
-                         placeholder="Ej: Mantenimiento programado para esta noche..."
-                         value={adminMessageInput}
-                         onChange={(e) => setAdminMessageInput(e.target.value)}
-                      />
-                      
+                      <p className="text-xs text-slate-400">Mensaje anclado para TODOS los usuarios.</p>
+                      <textarea className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white h-24 resize-none" placeholder="Ej: Mantenimiento programado..." value={adminMessageInput} onChange={(e) => setAdminMessageInput(e.target.value)}/>
                       <div className="flex gap-2">
-                          <button onClick={() => handleSaveAlert(true)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded font-bold text-sm">
-                             Publicar Aviso
-                          </button>
-                          <button onClick={() => handleSaveAlert(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded font-bold text-sm">
-                             Ocultar Aviso
-                          </button>
-                      </div>
-                      
-                      <div className="mt-4 pt-4 border-t border-slate-700">
-                          <p className="text-xs text-slate-500 flex items-center gap-1"><AlertTriangle size={12}/> Más herramientas próximamente...</p>
+                          <button onClick={() => handleSaveAlert(true)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded font-bold text-sm">Publicar</button>
+                          <button onClick={() => handleSaveAlert(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded font-bold text-sm">Ocultar</button>
                       </div>
                   </div>
                </div>
@@ -409,6 +462,14 @@ export default function Dashboard() {
                         {userName} {isAdmin && <span className="text-xs ml-1 opacity-70">(Admin)</span>}
                       </h2>
                     </div>
+                    {/* BOTÓN SETTINGS (NUEVO) */}
+                    <button 
+                        onClick={() => setShowBudgetSettings(true)}
+                        className="bg-slate-800 p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all ml-2 border border-slate-700"
+                        title="Configurar Presupuestos"
+                    >
+                        <Settings size={20} />
+                    </button>
                 </div>
                 <div className="text-right hidden md:block">
                     <p className="text-slate-400 text-xs">Patrimonio Total (Net Worth)</p>
@@ -451,7 +512,7 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* SECCIÓN STEAM REDISEÑADA (INVENTARIO HORIZONTAL) */}
+                {/* SECCIÓN STEAM REDISEÑADA */}
                 <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 flex flex-col h-full max-h-[350px]">
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold text-white flex items-center gap-2"><Gamepad2 className="text-sky-400" size={20}/> Cartera Steam</h3>
@@ -518,13 +579,14 @@ export default function Dashboard() {
                 )}
             </div>
 
-            {/* FILA INFERIOR */}
+            {/* FILA INFERIOR (PRESUPUESTOS DINÁMICOS) */}
             <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-5 gap-4">
                 {DISPLAY_CATEGORIES.map((cat, index) => {
                     const totalUsed = categoryData.find(c => c.name === cat)?.value || 0;
-                    const limit = BUDGETS[cat] || 1000;
+                    // Aquí usamos el estado 'budgets' en lugar de la constante
+                    const limit = budgets[cat as keyof typeof budgets] || 0;
                     const remaining = limit - totalUsed;
-                    const pct = Math.min((totalUsed / limit) * 100, 100);
+                    const pct = limit > 0 ? Math.min((totalUsed / limit) * 100, 100) : 100;
                     const color = COLORS[index + 1]; 
 
                     const pieData = [{ name: 'Gastado', value: totalUsed || 1 }, { name: 'Restante', value: remaining > 0 ? remaining : 0 }];
