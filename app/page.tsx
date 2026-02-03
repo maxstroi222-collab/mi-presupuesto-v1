@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, TrendingUp } from 'lucide-react';
+import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 
 export default function Dashboard() {
@@ -18,9 +18,12 @@ export default function Dashboard() {
 
   // --- ESTADOS DE DATOS ---
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
-  const [steamItems, setSteamItems] = useState<any[]>([]); // Nuevo estado para CS
+  const [steamItems, setSteamItems] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [showSteamForm, setShowSteamForm] = useState(false); // Formulario para añadir cajas
+  const [showSteamForm, setShowSteamForm] = useState(false);
+
+  // Estados Steam Fetch
+  const [fetchingPrice, setFetchingPrice] = useState(false);
 
   // --- MÁQUINA DEL TIEMPO ---
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -39,7 +42,7 @@ export default function Dashboard() {
     bg: '#0d1117', card: '#161b22', text: '#ffffff',
     nomina: '#0ea5e9', variable: '#f43f5e', facturas: '#fbbf24', 
     deuda: '#3b82f6', inversiones: '#8b5cf6', ahorro: '#10b981',
-    steam: '#66c0f4' // Azul Steam
+    steam: '#66c0f4' 
   };
 
   const CATEGORIES = ['Nómina', 'Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
@@ -52,7 +55,6 @@ export default function Dashboard() {
   
   const COLORS = [THEME.nomina, THEME.variable, THEME.facturas, THEME.deuda, THEME.inversiones, THEME.ahorro];
 
-  // Estado para nuevos items (Transacción y Steam)
   const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: 'Variable', date: new Date().toISOString().split('T')[0] });
   const [newSteamItem, setNewSteamItem] = useState({ name: '', quantity: '', price: '' });
 
@@ -75,6 +77,32 @@ export default function Dashboard() {
   async function loadAllData() {
     fetchTransactions();
     fetchSteamPortfolio();
+  }
+
+  // --- LÓGICA STEAM API ---
+  async function getSteamPrice() {
+    if(!newSteamItem.name) return;
+    setFetchingPrice(true);
+    try {
+        const response = await fetch(`/api/steam?name=${encodeURIComponent(newSteamItem.name)}`);
+        const data = await response.json();
+        
+        if (data.lowest_price || data.median_price) {
+            // Steam devuelve "0,35€" o "1.20€". Limpiamos el string.
+            let priceString = data.lowest_price || data.median_price;
+            // Reemplazar coma por punto y quitar símbolo de moneda
+            priceString = priceString.replace('€', '').replace(',', '.').trim();
+            // A veces sale "1,--" si es exacto, corregimos eso si pasara
+            priceString = priceString.replace('--', '00');
+            
+            setNewSteamItem(prev => ({ ...prev, price: priceString }));
+        } else {
+            alert("No encontrado. Asegúrate de escribir el nombre exacto en inglés (ej: 'Revolution Case').");
+        }
+    } catch (error) {
+        alert("Error al conectar con Steam.");
+    }
+    setFetchingPrice(false);
   }
 
   // --- FUNCIONES DB TRANSACCIONES ---
@@ -147,21 +175,16 @@ export default function Dashboard() {
   const totalExpenses = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const netIncome = income - totalExpenses;
 
-  // Saldo Inicial
   const startBalance = pastTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0) -
                        pastTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
 
   // --- CÁLCULO STEAM (CON FEE 15%) ---
-  // Valor Bruto = Cantidad * Precio
-  // Valor Neto = Valor Bruto * 0.85
   const steamTotalValue = steamItems.reduce((acc, item) => acc + (item.quantity * item.current_price), 0);
-  const steamNetValue = steamTotalValue * 0.85; // Restamos el 15% de comisión
+  const steamNetValue = steamTotalValue * 0.85; 
 
-  // Saldo Total (Dinero + Valor Neto de Cajas)
-  const currentBalance = startBalance + netIncome; // Dinero liquido
-  const netWorth = currentBalance + steamNetValue; // Patrimonio total (Liquido + Cajas)
+  const currentBalance = startBalance + netIncome; 
+  const netWorth = currentBalance + steamNetValue; 
 
-  // Datos Gráficas
   const categoryData = DISPLAY_CATEGORIES.map(cat => {
     let value = 0;
     if (cat === 'Inversiones' || cat === 'Ahorro') {
@@ -175,6 +198,12 @@ export default function Dashboard() {
 
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
+  
+  async function handleClearDatabase() {
+    if(!confirm("¿Borrar TUS datos?")) return;
+    const { error } = await supabase.from('transactions').delete().neq('id', 0);
+    if (!error) setAllTransactions([]);
+  }
 
   // --- VISTA LOGIN ---
   if (!session) return (
@@ -195,7 +224,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen p-4 md:p-6 font-sans text-white relative" style={{ backgroundColor: THEME.bg }}>
       
-      {/* Botones Flotantes */}
+      {/* Botón Flotante + */}
       <button onClick={() => {
             const today = new Date();
             let d = new Date(currentYear, currentMonthIndex, 1);
@@ -207,7 +236,16 @@ export default function Dashboard() {
         }}
         className="fixed bottom-8 right-8 z-50 bg-emerald-500 hover:bg-emerald-400 text-black font-bold p-4 rounded-full shadow-2xl hover:scale-110 transition-all"><Plus size={24} />
       </button>
-      <button onClick={handleLogout} className="fixed top-6 right-6 z-50 bg-[#161b22] p-2 rounded-lg border border-slate-800 flex gap-2 text-sm text-slate-400 hover:text-white"><LogOut size={16} /> Salir</button>
+
+      {/* Botones Izquierda Inferior (Salir y Basura) */}
+      <div className="fixed bottom-8 left-8 z-50 flex flex-col gap-3">
+          <button onClick={handleClearDatabase} className="bg-rose-900/50 hover:bg-rose-600 text-rose-200 hover:text-white p-3 rounded-full shadow-lg border border-rose-800 transition-all w-fit" title="Borrar DB">
+            <Trash2 size={20} />
+          </button>
+          <button onClick={handleLogout} className="bg-[#1e293b] hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-full shadow-xl border border-slate-600 flex items-center gap-2 transition-all">
+            <LogOut size={18} /> Salir
+          </button>
+      </div>
 
       {/* MODAL TRANSACCION */}
       {showForm && (
@@ -228,18 +266,30 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* MODAL STEAM */}
+      {/* MODAL STEAM (CON FETCH) */}
       {showSteamForm && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
           <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700">
             <div className="flex justify-between mb-4"><h3 className="font-bold text-sky-400">Añadir Caja CS</h3><button onClick={() => setShowSteamForm(false)}><X/></button></div>
             <div className="space-y-4">
-              <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Nombre (ej: Revolution Case)" value={newSteamItem.name} onChange={e => setNewSteamItem({...newSteamItem, name: e.target.value})}/>
+              <div className="flex gap-2">
+                 <input 
+                    className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" 
+                    placeholder="Market Hash Name (ej: Recoil Case)" 
+                    value={newSteamItem.name} 
+                    onChange={e => setNewSteamItem({...newSteamItem, name: e.target.value})}
+                    onBlur={getSteamPrice} // Al salir del campo, busca el precio
+                 />
+                 <button onClick={getSteamPrice} disabled={fetchingPrice} className="bg-sky-500/20 text-sky-400 p-3 rounded border border-sky-500/50">
+                    {fetchingPrice ? <Loader2 className="animate-spin" size={20}/> : <Search size={20}/>}
+                 </button>
+              </div>
+              
               <div className="grid grid-cols-2 gap-2">
                 <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Cantidad" value={newSteamItem.quantity} onChange={e => setNewSteamItem({...newSteamItem, quantity: e.target.value})}/>
                 <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Precio Unidad (€)" value={newSteamItem.price} onChange={e => setNewSteamItem({...newSteamItem, price: e.target.value})}/>
               </div>
-              <p className="text-xs text-slate-400">* Se aplicará automáticamente el -15% de comisión de Steam.</p>
+              <p className="text-xs text-slate-400">* Precio extraído de Steam Community Market.</p>
               <button onClick={handleAddSteam} className="w-full bg-sky-500 text-black font-bold py-3 rounded-lg"><Gamepad2 className="inline mr-2" size={18}/> Guardar en Cartera</button>
             </div>
           </div>
@@ -247,9 +297,9 @@ export default function Dashboard() {
       )}
 
       {/* LAYOUT PRINCIPAL */}
-      <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-6">
+      <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-6 pb-20">
         
-        {/* HEADER BIENVENIDA (Full Width) */}
+        {/* HEADER BIENVENIDA */}
         <div className="md:col-span-12 bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
              <div className="flex items-center gap-4">
                 <div className="bg-slate-800 p-3 rounded-full"><User className="text-emerald-400" size={24} /></div>
@@ -261,7 +311,7 @@ export default function Dashboard() {
              </div>
         </div>
 
-        {/* COLUMNA 1: SALDOS Y NAVEGACIÓN */}
+        {/* COLUMNA 1 */}
         <div className="md:col-span-3 space-y-4">
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center relative group select-none">
              <button onClick={goToPrevMonth} className="absolute left-2 top-1/2 -translate-y-1/2 p-2 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition"><ChevronLeft size={24} /></button>
@@ -283,10 +333,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* COLUMNA 2: GRÁFICAS Y STEAM */}
+        {/* COLUMNA 2 */}
         <div className="md:col-span-5 flex flex-col gap-4">
-            
-            {/* Tarjetas Ingreso/Gasto */}
             <div className="grid grid-cols-2 gap-4">
                 <div className="bg-[#161b22] px-4 py-5 rounded-xl border border-slate-800 flex flex-col justify-between h-28 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
@@ -328,7 +376,7 @@ export default function Dashboard() {
             </div>
         </div>
 
-        {/* COLUMNA 3: HISTORIAL (Ocupa el hueco derecho) */}
+        {/* COLUMNA 3 */}
         <div className="md:col-span-4 bg-[#161b22] rounded-xl border border-slate-800 p-4 flex flex-col h-full max-h-[500px]">
             <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Calendar className="text-slate-400" size={18}/> Historial {currentMonthName}</h3>
             {currentMonthTransactions.length === 0 ? (
@@ -353,26 +401,22 @@ export default function Dashboard() {
             )}
         </div>
 
-        {/* FILA INFERIOR: PRESUPUESTOS (CORREGIDOS) */}
+        {/* FILA INFERIOR */}
         <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-5 gap-4">
             {DISPLAY_CATEGORIES.map((cat, index) => {
                 const totalUsed = categoryData.find(c => c.name === cat)?.value || 0;
                 const limit = BUDGETS[cat] || 1000;
                 const remaining = limit - totalUsed;
                 const pct = Math.min((totalUsed / limit) * 100, 100);
-                const color = COLORS[index + 1]; // +1 porque el 0 es Nómina y esa no sale aquí
+                const color = COLORS[index + 1]; 
 
-                const pieData = [
-                    { name: 'Gastado', value: totalUsed || 1 }, 
-                    { name: 'Restante', value: remaining > 0 ? remaining : 0 }
-                ];
+                const pieData = [{ name: 'Gastado', value: totalUsed || 1 }, { name: 'Restante', value: remaining > 0 ? remaining : 0 }];
                 
                 return (
                     <div key={cat} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: color}}></div>
                         <h3 className="text-xs font-bold mb-1 uppercase tracking-wide" style={{color: color}}>{cat}</h3>
                         
-                        {/* Gráfica */}
                         <div className="w-20 h-20 relative mb-2">
                              <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
@@ -386,19 +430,15 @@ export default function Dashboard() {
                              </div>
                         </div>
 
-                        {/* Texto explícito: Gastado / Límite */}
                         <div className="text-center w-full">
                             <p className="text-lg font-bold text-white">{formatEuro(totalUsed)}</p>
-                            <p className="text-[10px] text-slate-500 border-t border-slate-700 pt-1 mt-1">
-                                Límite: <span className="text-slate-300">{formatEuro(limit)}</span>
-                            </p>
+                            <p className="text-[10px] text-slate-500 border-t border-slate-700 pt-1 mt-1">Límite: <span className="text-slate-300">{formatEuro(limit)}</span></p>
                         </div>
                     </div>
                 )
             })}
         </div>
       </div>
-      
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #0d1117; }
