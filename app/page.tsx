@@ -12,22 +12,31 @@ export default function Dashboard() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   
+  // --- LÓGICA DE FECHA AUTOMÁTICA ---
+  // Obtenemos la fecha actual
+  const now = new Date();
+  // Obtenemos el nombre del mes en español (ej: "febrero")
+  const monthName = now.toLocaleString('es-ES', { month: 'long' });
+  // Ponemos la primera letra en mayúscula (ej: "Febrero")
+  const currentMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+  const currentYear = now.getFullYear();
+
   // Colores exactos de la imagen
   const THEME = {
-    bg: '#0d1117',        // Fondo principal muy oscuro
-    card: '#161b22',      // Fondo de tarjetas
+    bg: '#0d1117',        
+    card: '#161b22',      
     text: '#ffffff',
     textDim: '#8b949e',
-    variable: '#f43f5e',  // Rosa (Variable)
-    bills: '#fbbf24',     // Amarillo (Bills)
-    debt: '#3b82f6',      // Azul (Debt)
-    investments: '#8b5cf6', // Morado (Investments)
-    savings: '#10b981',   // Verde (Savings)
+    variable: '#f43f5e',  
+    bills: '#fbbf24',     
+    debt: '#3b82f6',      
+    investments: '#8b5cf6', 
+    savings: '#10b981',   
   };
 
   const CATEGORIES = ['Variable', 'Bills', 'Debt', 'Investments', 'Savings'];
   
-  // Presupuestos "Goal" simulados para que se vea como la foto
+  // Presupuestos "Goal" simulados
   const BUDGETS: any = { 
     'Variable': 2420, 
     'Bills': 1805, 
@@ -78,16 +87,13 @@ export default function Dashboard() {
     return { name: cat, value };
   });
 
-  // Datos para el gráfico Donut (solo gastos > 0)
   const donutData = categoryData.filter(c => c.value > 0);
-  
-  // Colores mapeados para el gráfico
   const COLORS = [THEME.variable, THEME.bills, THEME.debt, THEME.investments, THEME.savings];
 
   return (
     <div className="min-h-screen p-4 md:p-6 font-sans text-white" style={{ backgroundColor: THEME.bg }}>
       
-      {/* Botón flotante para añadir datos (para no ensuciar el diseño) */}
+      {/* Botón flotante */}
       <button 
         onClick={() => setShowForm(true)}
         className="fixed bottom-8 right-8 z-50 bg-emerald-500 hover:bg-emerald-400 text-black font-bold p-4 rounded-full shadow-2xl transition-all transform hover:scale-110"
@@ -95,7 +101,7 @@ export default function Dashboard() {
         <Plus size={24} />
       </button>
 
-      {/* MODAL DE FORMULARIO */}
+      {/* MODAL FORMULARIO */}
       {showForm && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
           <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700">
@@ -137,30 +143,28 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* --- GRID PRINCIPAL (LAYOUT IDÉNTICO A LA FOTO) --- */}
+      {/* --- GRID PRINCIPAL --- */}
       <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-4">
         
-        {/* 1. COLUMNA IZQUIERDA (FECHA Y SALDOS) */}
+        {/* 1. COLUMNA IZQUIERDA (FECHA AUTOMÁTICA) */}
         <div className="md:col-span-3 space-y-4">
-          {/* September Header */}
+          
+          {/* AQUÍ ESTÁ EL CAMBIO DE LA FECHA */}
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
-             <h1 className="text-3xl font-light text-white">Septiembre</h1>
-             <p className="text-slate-500 text-xs uppercase tracking-widest mt-1">- Monthly Dashboard -</p>
+             <h1 className="text-3xl font-light text-white">{currentMonth}</h1>
+             <p className="text-slate-500 text-xs uppercase tracking-widest mt-1">- {currentYear} Dashboard -</p>
           </div>
           
-          {/* Starting Balance */}
           <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
              <span className="text-slate-400 text-xs">Saldo Inicial</span>
              <span className="text-white font-mono">$2,001.67</span>
           </div>
           
-          {/* Projected Remaining */}
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
              <p className="text-slate-400 text-xs mb-2">Saldo Proyectado</p>
              <h2 className="text-2xl font-bold text-white">${(2001.67 + netIncome).toFixed(2)}</h2>
           </div>
 
-          {/* Remaining Balance (Highlight) */}
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center relative overflow-hidden">
              <div className="absolute bottom-0 left-0 w-full h-1 bg-emerald-500"></div>
              <p className="text-slate-400 text-xs mb-2">Saldo Actual</p>
@@ -168,15 +172,12 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* 2. ZONA CENTRAL (INGRESOS vs GASTOS) */}
+        {/* 2. ZONA CENTRAL */}
         <div className="md:col-span-6 flex flex-col gap-4">
-          {/* Fila Superior: Total Ingresos vs Total Gastos */}
           <div className="grid grid-cols-2 gap-4 h-full">
-             {/* Total Income */}
              <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
                 <h3 className="text-emerald-400 font-medium mb-1">Total Income</h3>
                 <h2 className="text-3xl font-bold text-white mb-4">${income.toFixed(2)}</h2>
-                {/* Barras comparativas fake vs presupuesto */}
                 <div className="space-y-2 text-xs">
                    <div className="flex justify-between text-slate-500"><span>Budget</span><span>$7,200.00</span></div>
                    <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
@@ -189,7 +190,6 @@ export default function Dashboard() {
                 </div>
              </div>
 
-             {/* Total Expenses */}
              <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
                 <h3 className="text-rose-500 font-medium mb-1">Total Expenses</h3>
                 <h2 className="text-3xl font-bold text-white mb-4">${totalExpenses.toFixed(2)}</h2>
@@ -206,9 +206,7 @@ export default function Dashboard() {
              </div>
           </div>
 
-          {/* Fila Inferior: Barras Largas */}
           <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 flex flex-col justify-center gap-6">
-             {/* Barra Total Income vs Total Expense */}
              <div>
                 <div className="flex justify-center gap-4 text-xs mb-2">
                    <span className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500"></div> Total Income</span>
@@ -220,7 +218,6 @@ export default function Dashboard() {
                 </div>
              </div>
 
-             {/* Barra Multicolor de Categorías */}
              <div>
                  <div className="w-full h-8 bg-slate-800 rounded flex overflow-hidden">
                      {categoryData.map((cat, i) => (
@@ -242,9 +239,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* 3. COLUMNA DERECHA (NET INCOME y DONUT) */}
+        {/* 3. COLUMNA DERECHA */}
         <div className="md:col-span-3 flex flex-col gap-4">
-           {/* Net Income */}
            <div className="bg-[#161b22] p-6 rounded-xl border border-slate-800 text-center">
                <p className="text-slate-400 text-sm">Net Income</p>
                <h2 className={`text-2xl font-bold mt-2 ${netIncome >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
@@ -252,7 +248,6 @@ export default function Dashboard() {
                </h2>
            </div>
 
-           {/* Donut Chart */}
            <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 flex flex-col items-center justify-center">
                <h3 className="text-slate-300 text-sm mb-4">Total Expenses Breakdown</h3>
                <div className="w-full h-48 relative">
@@ -273,12 +268,10 @@ export default function Dashboard() {
                             <RechartsTooltip contentStyle={{backgroundColor: '#0d1117', borderColor: '#30363d', borderRadius: '8px'}} itemStyle={{color: '#fff'}} />
                         </PieChart>
                     </ResponsiveContainer>
-                    {/* Texto Central del Donut */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <span className="text-xs font-bold text-slate-500">100%</span>
                     </div>
                </div>
-               {/* Leyenda Personalizada */}
                <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
                    {CATEGORIES.map((cat, i) => (
                        <div key={i} className="flex items-center gap-2 text-[10px] text-slate-400">
@@ -290,11 +283,10 @@ export default function Dashboard() {
            </div>
         </div>
 
-        {/* 4. FILA INFERIOR (LAS 5 CATEGORÍAS) */}
+        {/* 4. FILA INFERIOR */}
         <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-5 gap-4 mt-2">
             {CATEGORIES.map((cat, index) => {
                 const total = categoryData.find(c => c.name === cat)?.value || 0;
-                // Si el gasto es 0, poner un mínimo para que se vea algo en el gráfico gris
                 const pieData = [
                     { name: 'Used', value: total || 1 }, 
                     { name: 'Remaining', value: (BUDGETS[cat] - total) > 0 ? (BUDGETS[cat] - total) : 0 }
@@ -304,13 +296,11 @@ export default function Dashboard() {
 
                 return (
                     <div key={cat} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden group">
-                        {/* Borde superior de color */}
                         <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: color}}></div>
                         
                         <h3 className="text-sm font-bold mb-1" style={{color: color}}>{cat}</h3>
                         <h2 className="text-xl font-bold text-white mb-4">${total.toFixed(2)}</h2>
                         
-                        {/* Mini Gráfico Circular por Categoría */}
                         <div className="w-24 h-24 relative mb-4">
                              <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
@@ -333,7 +323,6 @@ export default function Dashboard() {
                              </div>
                         </div>
 
-                        {/* Barras de Presupuesto (Goal Progress) */}
                         <div className="w-full space-y-2 mt-auto">
                             <div className="flex justify-between text-[10px] text-slate-400">
                                 <span>Goal Progress</span>
