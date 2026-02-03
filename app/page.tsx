@@ -50,8 +50,8 @@ export default function Dashboard() {
   const DISPLAY_CATEGORIES = ['Variable', 'Facturas', 'Deuda', 'Inversiones', 'Ahorro'];
   
   const BUDGETS: any = { 
-    'Nómina': 2500, 'Variable': 1200, 'Facturas': 800, 
-    'Deuda': 500, 'Inversiones': 300, 'Ahorro': 200 
+    'Nómina': 1450, 'Variable': 400, 'Facturas': 400, 
+    'Deuda': 400, 'Inversiones': 200, 'Ahorro': 200 
   };
   
   const COLORS = [THEME.nomina, THEME.variable, THEME.facturas, THEME.deuda, THEME.inversiones, THEME.ahorro];
