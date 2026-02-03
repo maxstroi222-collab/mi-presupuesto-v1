@@ -222,6 +222,8 @@ export default function Dashboard() {
 
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
+// Detectamos si en los metadatos de la sesión aparece el rol de admin
+const isAdmin = session?.user?.app_metadata?.role === 'admin';
   
   // --- VISTA LOGIN ---
   if (!session) return (
@@ -307,15 +309,22 @@ export default function Dashboard() {
       {/* LAYOUT PRINCIPAL */}
       <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-6 pb-20">
         
-        {/* HEADER BIENVENIDA */}
+    {/* HEADER BIENVENIDA */}
         <div className="md:col-span-12 bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
              <div className="flex items-center gap-4">
-                <div className="bg-slate-800 p-3 rounded-full"><User className="text-emerald-400" size={24} /></div>
-                <div><p className="text-slate-400 text-xs uppercase tracking-wider">Bienvenido</p><h2 className="text-lg font-bold text-white">{userName}</h2></div>
+                <div className="bg-slate-800 p-3 rounded-full">
+                  <User className={isAdmin ? "text-red-500" : "text-emerald-400"} size={24} />
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs uppercase tracking-wider">Bienvenido</p>
+                  <h2 className={`text-lg font-bold ${isAdmin ? 'text-red-500' : 'text-white'}`}>
+                    {userName} {isAdmin && <span className="text-xs ml-1 opacity-70">(Admin)</span>}
+                  </h2>
+                </div>
              </div>
              <div className="text-right hidden md:block">
                  <p className="text-slate-400 text-xs">Patrimonio Total (Net Worth)</p>
-                 <h2 className="text-2xl font-bold text-emerald-400">{formatEuro(netWorth)}</h2>
+                 <h2 className={`text-2xl font-bold ${isAdmin ? 'text-red-500' : 'text-emerald-400'}`}>{formatEuro(netWorth)}</h2>
              </div>
         </div>
 
