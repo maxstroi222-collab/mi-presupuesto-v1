@@ -524,7 +524,7 @@ export default function Dashboard() {
                         {privacyMode ? <EyeOff size={16}/> : <Eye size={16}/>}
                     </button>
                 </div>
-                <div className="text-right hidden md:block"><p className="text-slate-400 text-xs">Patrimonio Total</p><h2 className={`text-2xl font-bold ${isAdmin ? 'text-red-500' : 'text-emerald-400'} ${blurClass}`}>{formatEuro(netWorth)}</h2></div>
+                <div className="text-right hidden md:block"><p className="text-slate-400 text-xs">Patrimonio Total</p><h2 className={`text-2xl font-bold ${isAdmin ? 'text-white-500' : 'text-emerald-400'} ${blurClass}`}>{formatEuro(netWorth)}</h2></div>
             </div>
 
             <div className="md:col-span-3 space-y-4">
