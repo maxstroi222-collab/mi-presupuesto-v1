@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, Megaphone, Settings, Tag, Wallet } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, LabelList } from 'recharts';
 
 export default function Dashboard() {
   // --- ESTADOS DE USUARIO ---
@@ -22,6 +22,9 @@ export default function Dashboard() {
   
   // ESTADO CORE: CATEGORÍAS DEL USUARIO
   const [categories, setCategories] = useState<any[]>([]);
+
+  // ESTADOS DE UI GLOBAL
+  const [privacyMode, setPrivacyMode] = useState(false); // NUEVO: Estado para el modo privacidad
 
   // MODALES
   const [showForm, setShowForm] = useState(false);
@@ -169,13 +172,9 @@ export default function Dashboard() {
     if (!newItem.name || !newItem.amount || !session) return;
     if (categories.length === 0) { alert("¡Crea una categoría primero!"); return; }
     
-    // Auto-detectar tipo según la categoría seleccionada
-    const selectedCat = categories.find(c => c.name === newItem.category);
-    const type = selectedCat ? (selectedCat.is_income ? 'income' : 'expense') : newItem.type;
-
     const { error } = await supabase.from('transactions').insert([{ 
       user_id: session.user.id, name: newItem.name, amount: parseFloat(newItem.amount), 
-      type: type, category: newItem.category, date: new Date(newItem.date).toISOString() 
+      type: newItem.type, category: newItem.category, date: new Date(newItem.date).toISOString() 
     }]);
     if (!error) { setNewItem({ ...newItem, name: '', amount: '' }); setShowForm(false); fetchTransactions(); }
   }
@@ -224,7 +223,7 @@ export default function Dashboard() {
     setLoading(false);
   }
 
-  // --- CÁLCULOS ---
+  // --- CÁLCULOS GENERALES ---
   const currentMonthTransactions = allTransactions.filter(t => {
     const d = new Date(t.date);
     return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
@@ -241,6 +240,30 @@ export default function Dashboard() {
   
   const currentBalance = startBalance + (income - totalExpenses);
   const netWorth = currentBalance + steamNetValue;
+
+  // --- CÁLCULOS COMPARATIVA MENSUAL (NUEVO) ---
+  // 1. Determinar fecha del mes pasado
+  const lastMonthDate = new Date(currentYear, currentMonthIndex - 1, 1);
+  const lastMonthIdx = lastMonthDate.getMonth();
+  const lastMonthYearIdx = lastMonthDate.getFullYear();
+  
+  // 2. Filtrar y sumar gastos del mes pasado
+  const lastMonthExpenses = allTransactions
+      .filter(t => {
+          const d = new Date(t.date);
+          return t.type === 'expense' && d.getMonth() === lastMonthIdx && d.getFullYear() === lastMonthYearIdx;
+      })
+      .reduce((acc, t) => acc + t.amount, 0);
+
+  // 3. Datos para la gráfica de barras
+  const comparisonData = [
+    { name: 'Mes Pasado', amount: lastMonthExpenses },
+    { name: 'Este Mes', amount: totalExpenses },
+  ];
+
+  // --- FORMATO Y UTILIDADES ---
+  // Clase CSS condicional para el modo privacidad
+  const blurClass = privacyMode ? 'blur-[3px] select-none transition-all' : 'transition-all';
 
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
@@ -400,9 +423,13 @@ export default function Dashboard() {
                     <div className="bg-slate-800 p-3 rounded-full"><User className={isAdmin ? "text-red-500" : "text-emerald-400"} size={24} /></div>
                     <div><p className="text-slate-400 text-xs uppercase tracking-wider">Bienvenido</p><h2 className={`text-lg font-bold ${isAdmin ? 'text-red-500' : 'text-white'}`}>{userName} {isAdmin && "(Admin)"}</h2></div>
                     {/* BOTÓN GESTOR DE CATEGORÍAS */}
-                    <button onClick={() => setShowCatManager(true)} className="ml-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg border border-slate-700 flex items-center gap-2 text-xs transition"><Settings size={14}/> Configurar Categorías</button>
+                    <button onClick={() => setShowCatManager(true)} className="ml-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg border border-slate-700 flex items-center gap-2 text-xs transition"><Settings size={14}/> Categorías</button>
+                    {/* BOTÓN PRIVACIDAD (NUEVO) */}
+                    <button onClick={() => setPrivacyMode(!privacyMode)} className="ml-2 bg-slate-800 hover:bg-slate-700 text-slate-300 p-2 rounded-lg border border-slate-700 flex items-center transition" title={privacyMode ? "Mostrar valores" : "Ocultar valores"}>
+                        {privacyMode ? <EyeOff size={16}/> : <Eye size={16}/>}
+                    </button>
                 </div>
-                <div className="text-right hidden md:block"><p className="text-slate-400 text-xs">Patrimonio Total</p><h2 className={`text-2xl font-bold ${isAdmin ? 'text-red-500' : 'text-emerald-400'}`}>{formatEuro(netWorth)}</h2></div>
+                <div className="text-right hidden md:block"><p className="text-slate-400 text-xs">Patrimonio Total</p><h2 className={`text-2xl font-bold ${isAdmin ? 'text-red-500' : 'text-emerald-400'} ${blurClass}`}>{formatEuro(netWorth)}</h2></div>
             </div>
 
             <div className="md:col-span-3 space-y-4">
@@ -412,14 +439,29 @@ export default function Dashboard() {
                 <h1 className="text-3xl font-light text-white cursor-pointer" onClick={goToToday}>{currentMonthName}</h1>
                 <p className="text-slate-500 text-xs mt-1">- {currentYear} -</p>
               </div>
-              <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center"><span className="text-slate-400 text-xs">Saldo Líquido</span><span className="text-white font-mono font-bold">{formatEuro(currentBalance)}</span></div>
-              <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center"><span className="text-sky-400 text-xs">Steam Neto</span><span className="text-white font-mono font-bold">{formatEuro(steamNetValue)}</span></div>
+              <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center"><span className="text-slate-400 text-xs">Saldo Líquido</span><span className={`text-white font-mono font-bold ${blurClass}`}>{formatEuro(currentBalance)}</span></div>
+              <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center"><span className="text-sky-400 text-xs">Steam Neto</span><span className={`text-white font-mono font-bold ${blurClass}`}>{formatEuro(steamNetValue)}</span></div>
+
+              {/* NUEVA GRÁFICA COMPARATIVA MENSUAL */}
+              <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800">
+                 <h3 className="font-bold text-white text-sm mb-3 flex gap-2 items-center"><TrendingDown size={16} className="text-rose-500"/> Comparativa Gastos</h3>
+                 <ResponsiveContainer width="100%" height={120}>
+                    <BarChart layout="vertical" data={comparisonData} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                        <XAxis type="number" hide />
+                        <YAxis dataKey="name" type="category" tick={{ fill: '#94a3b8', fontSize: 10 }} tickLine={false} axisLine={false} />
+                        <RechartsTooltip cursor={{fill: 'transparent'}} contentStyle={{backgroundColor: '#1e293b', border: 'none', borderRadius: '8px'}} itemStyle={{color: '#fff', fontSize:'12px'}} formatter={(value) => formatEuro(value as number)}/>
+                        <Bar dataKey="amount" fill="#f43f5e" radius={[0, 4, 4, 0]} barSize={24}>
+                           <LabelList dataKey="amount" position="right" fill="#fff" fontSize={10} formatter={(val: number) => privacyMode ? '****' : formatEuro(val)}/>
+                        </Bar>
+                    </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
 
             <div className="md:col-span-5 flex flex-col gap-4">
                 <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div><h3 className="text-emerald-400 text-xs font-medium">INGRESOS MES</h3><h2 className="text-2xl font-bold text-white">{formatEuro(income)}</h2></div>
-                    <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div><h3 className="text-rose-500 text-xs font-medium">GASTOS MES</h3><h2 className="text-2xl font-bold text-white">{formatEuro(totalExpenses)}</h2></div>
+                    <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div><h3 className="text-emerald-400 text-xs font-medium">INGRESOS MES</h3><h2 className={`text-2xl font-bold text-white ${blurClass}`}>{formatEuro(income)}</h2></div>
+                    <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div><h3 className="text-rose-500 text-xs font-medium">GASTOS MES</h3><h2 className={`text-2xl font-bold text-white ${blurClass}`}>{formatEuro(totalExpenses)}</h2></div>
                 </div>
 
                 {/* STEAM GRID */}
@@ -430,7 +472,7 @@ export default function Dashboard() {
                             <div key={item.id} className="bg-[#0d1117] p-2 rounded border border-slate-800 flex flex-col justify-between h-20 relative group">
                                 <button onClick={() => handleDeleteSteam(item.id)} className="absolute top-1 right-1 text-slate-600 opacity-0 group-hover:opacity-100"><Trash2 size={10}/></button>
                                 <p className="text-[10px] text-white truncate">{item.item_name}</p>
-                                <div className="mt-auto flex justify-between items-end border-t border-slate-800 pt-1"><span className="text-[9px] text-slate-500">{item.quantity} ud</span><span className="text-xs font-bold text-sky-400">{formatEuro(item.quantity * item.current_price * 0.85)}</span></div>
+                                <div className="mt-auto flex justify-between items-end border-t border-slate-800 pt-1"><span className="text-[9px] text-slate-500">{item.quantity} ud</span><span className={`text-xs font-bold text-sky-400 ${blurClass}`}>{formatEuro(item.quantity * item.current_price * 0.85)}</span></div>
                             </div>
                         ))}
                     </div>
@@ -443,7 +485,7 @@ export default function Dashboard() {
                     {currentMonthTransactions.map(t => (
                         <div key={t.id} className="flex justify-between items-center p-2 rounded bg-[#0d1117] border border-slate-800 group text-xs">
                             <div><p className="text-white font-medium">{t.name}</p><p className="text-[9px] text-slate-500">{t.category}</p></div>
-                            <div className="flex gap-2"><span className={t.type==='income'?'text-emerald-400':'text-rose-500'}>{formatEuro(t.type === 'income' ? t.amount : -t.amount)}</span><button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button></div>
+                            <div className="flex gap-2"><span className={`${t.type==='income'?'text-emerald-400':'text-rose-500'} ${blurClass}`}>{formatEuro(t.type === 'income' ? t.amount : -t.amount)}</span><button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button></div>
                         </div>
                     ))}
                 </div>
@@ -470,9 +512,9 @@ export default function Dashboard() {
                                 <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{pct.toFixed(0)}%</div>
                             </div>
                             <div className="text-center w-full">
-                                <p className="text-lg font-bold">{formatEuro(totalUsed)}</p>
+                                <p className={`text-lg font-bold ${blurClass}`}>{formatEuro(totalUsed)}</p>
                                 <button onClick={() => setEditingLimit({id: cat.id, name: cat.name, amount: limit})} className="text-[9px] text-slate-500 hover:text-white flex items-center justify-center gap-1 w-full mt-1">
-                                    {cat.is_income ? 'Meta: ' : 'Límite: '}{formatEuro(limit)} <Settings size={10}/>
+                                    {cat.is_income ? 'Meta: ' : 'Límite: '}<span className={blurClass}>{formatEuro(limit)}</span> <Settings size={10}/>
                                 </button>
                             </div>
                         </div>
