@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, Megaphone, Settings, Tag } from 'lucide-react';
+import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, Megaphone, Settings, Tag, Wallet } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
 export default function Dashboard() {
@@ -80,19 +80,16 @@ export default function Dashboard() {
     fetchSteamPortfolio();
   }
 
-  // --- LÓGICA DE CATEGORÍAS (CORREGIDA: SIN DEFAULT AUTOMÁTICO) ---
+  // --- LÓGICA DE CATEGORÍAS ---
   async function fetchCategories(userId: string) {
     const { data } = await supabase.from('user_categories').select('*').order('created_at', { ascending: true });
     
     if (data) {
         setCategories(data);
-        // Si hay categorías, seleccionamos la primera por defecto para el formulario
         if (data.length > 0 && !newItem.category) {
             setNewItem(prev => ({ ...prev, category: data[0].name }));
         }
     }
-    // AQUÍ ESTABA EL ERROR: Hemos eliminado el "else" que creaba categorías automáticas.
-    // Ahora, si data es vacío, categories se queda vacío [].
   }
 
   async function handleCreateCategory() {
@@ -172,9 +169,13 @@ export default function Dashboard() {
     if (!newItem.name || !newItem.amount || !session) return;
     if (categories.length === 0) { alert("¡Crea una categoría primero!"); return; }
     
+    // Auto-detectar tipo según la categoría seleccionada
+    const selectedCat = categories.find(c => c.name === newItem.category);
+    const type = selectedCat ? (selectedCat.is_income ? 'income' : 'expense') : newItem.type;
+
     const { error } = await supabase.from('transactions').insert([{ 
       user_id: session.user.id, name: newItem.name, amount: parseFloat(newItem.amount), 
-      type: newItem.type, category: newItem.category, date: new Date(newItem.date).toISOString() 
+      type: type, category: newItem.category, date: new Date(newItem.date).toISOString() 
     }]);
     if (!error) { setNewItem({ ...newItem, name: '', amount: '' }); setShowForm(false); fetchTransactions(); }
   }
@@ -285,7 +286,9 @@ export default function Dashboard() {
                                         <div className="w-4 h-4 rounded-full" style={{backgroundColor: cat.color}}></div>
                                         <div>
                                             <p className="font-bold text-sm">{cat.name}</p>
-                                            <p className="text-[10px] text-slate-400">Límite: {formatEuro(cat.budget_limit)} • {cat.is_income ? 'Ingreso' : 'Gasto'}</p>
+                                            <p className="text-[10px] text-slate-400">
+                                                {cat.is_income ? `Meta: ${formatEuro(cat.budget_limit)}` : `Límite: ${formatEuro(cat.budget_limit)}`} • {cat.is_income ? 'Ingreso' : 'Gasto'}
+                                            </p>
                                         </div>
                                     </div>
                                     <button onClick={() => handleDeleteCategory(cat.id, cat.name)} className="text-slate-600 hover:text-rose-500"><Trash2 size={16}/></button>
@@ -298,15 +301,15 @@ export default function Dashboard() {
                     <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700">
                         <p className="text-xs text-slate-400 mb-2 uppercase font-bold">Crear Nueva Categoría</p>
                         <div className="grid grid-cols-2 gap-2 mb-2">
-                            <input className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Nombre (ej: Gimnasio)" value={newCatForm.name} onChange={e => setNewCatForm({...newCatForm, name: e.target.value})}/>
+                            <input className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Nombre (ej: Ahorro)" value={newCatForm.name} onChange={e => setNewCatForm({...newCatForm, name: e.target.value})}/>
                             <div className="flex gap-2">
-                                <input type="number" className="flex-1 bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Límite €" value={newCatForm.budget_limit} onChange={e => setNewCatForm({...newCatForm, budget_limit: e.target.value})}/>
+                                <input type="number" className="flex-1 bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Meta/Límite" value={newCatForm.budget_limit} onChange={e => setNewCatForm({...newCatForm, budget_limit: e.target.value})}/>
                                 <input type="color" className="w-10 h-full bg-transparent border-none cursor-pointer" value={newCatForm.color} onChange={e => setNewCatForm({...newCatForm, color: e.target.value})}/>
                             </div>
                         </div>
                         <div className="flex justify-between items-center mt-2">
                             <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
-                                <input type="checkbox" checked={newCatForm.is_income} onChange={e => setNewCatForm({...newCatForm, is_income: e.target.checked})}/> Es tipo Ingreso (Suma)
+                                <input type="checkbox" checked={newCatForm.is_income} onChange={e => setNewCatForm({...newCatForm, is_income: e.target.checked})}/> Es tipo Ingreso (Ahorro/Nómina)
                             </label>
                             <button onClick={handleCreateCategory} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded text-sm font-bold flex items-center gap-2"><Plus size={14}/> Crear</button>
                         </div>
@@ -336,7 +339,10 @@ export default function Dashboard() {
                   <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Concepto" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}/>
                   <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white" placeholder="Cantidad" value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}/>
                   <div className="grid grid-cols-2 gap-2">
-                    <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.type} onChange={e => setNewItem({...newItem, type: e.target.value})}><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
+                     {/* El tipo se selecciona automáticamente basado en la categoría, pero lo mostramos deshabilitado o informativo si se quiere */}
+                     <div className="bg-[#0f172a] border border-slate-600 rounded p-3 text-slate-400 text-center text-sm flex items-center justify-center">
+                        {categories.find(c => c.name === newItem.category)?.is_income ? 'Ingreso (+)' : 'Gasto (-)'}
+                     </div>
                     {/* LISTA DINÁMICA DE CATEGORÍAS */}
                     {categories.length > 0 ? (
                         <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
@@ -356,7 +362,8 @@ export default function Dashboard() {
           {editingLimit && (
             <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4">
               <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-xs border border-slate-700 text-center">
-                 <h3 className="font-bold mb-4">Límite: {editingLimit.name}</h3>
+                 <h3 className="font-bold mb-4">{editingLimit.amount > 0 ? 'Editar Objetivo' : 'Establecer Objetivo'}</h3>
+                 <p className="text-sky-400 text-sm font-bold mb-2">{editingLimit.name}</p>
                  <input autoFocus type="number" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white text-xl mb-4 text-center" value={editingLimit.amount} onChange={e => setEditingLimit({...editingLimit, amount: parseFloat(e.target.value) || 0})}/>
                  <div className="flex gap-2">
                     <button onClick={() => setEditingLimit(null)} className="flex-1 bg-slate-700 py-2 rounded">Cancelar</button>
@@ -417,13 +424,13 @@ export default function Dashboard() {
 
                 {/* STEAM GRID */}
                 <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 overflow-hidden flex flex-col">
-                    <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Gamepad2 className="text-sky-400"/> Steam</h3><button onClick={() => setShowSteamForm(true)} className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-1 rounded">+ Caja</button></div>
+                    <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Gamepad2 className="text-sky-400"/> Steam</h3><div className="flex gap-2"><button onClick={refreshAllSteamPrices} disabled={refreshingSteam} className="bg-slate-700 px-2 rounded"><RefreshCw size={12} className={refreshingSteam ? "animate-spin" : ""}/></button><button onClick={() => setShowSteamForm(true)} className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-1 rounded">+ Caja</button></div></div>
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 overflow-y-auto custom-scrollbar">
                         {steamItems.map(item => (
                             <div key={item.id} className="bg-[#0d1117] p-2 rounded border border-slate-800 flex flex-col justify-between h-20 relative group">
                                 <button onClick={() => handleDeleteSteam(item.id)} className="absolute top-1 right-1 text-slate-600 opacity-0 group-hover:opacity-100"><Trash2 size={10}/></button>
                                 <p className="text-[10px] text-white truncate">{item.item_name}</p>
-                                <p className="text-xs font-bold text-sky-400">{formatEuro(item.quantity * item.current_price * 0.85)}</p>
+                                <div className="mt-auto flex justify-between items-end border-t border-slate-800 pt-1"><span className="text-[9px] text-slate-500">{item.quantity} ud</span><span className="text-xs font-bold text-sky-400">{formatEuro(item.quantity * item.current_price * 0.85)}</span></div>
                             </div>
                         ))}
                     </div>
@@ -436,31 +443,37 @@ export default function Dashboard() {
                     {currentMonthTransactions.map(t => (
                         <div key={t.id} className="flex justify-between items-center p-2 rounded bg-[#0d1117] border border-slate-800 group text-xs">
                             <div><p className="text-white font-medium">{t.name}</p><p className="text-[9px] text-slate-500">{t.category}</p></div>
-                            <div className="flex gap-2"><span className={t.type==='income'?'text-emerald-400':'text-rose-500'}>{formatEuro(t.amount)}</span><button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button></div>
+                            <div className="flex gap-2"><span className={t.type==='income'?'text-emerald-400':'text-rose-500'}>{formatEuro(t.type === 'income' ? t.amount : -t.amount)}</span><button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button></div>
                         </div>
                     ))}
                 </div>
             </div>
 
-            {/* TARJETAS DINÁMICAS (Solo las de Gasto) */}
+            {/* TARJETAS DINÁMICAS (AHORA MUESTRA TODO) */}
             <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-5 gap-4">
-                {categories.filter(c => !c.is_income).map((cat) => {
-                    const totalUsed = currentMonthTransactions.filter(t => t.category === cat.name).reduce((acc, t) => acc + t.amount, 0);
+                {categories.map((cat) => {
+                    // Calculamos total (si es ingreso suma ingresos, si es gasto suma gastos)
+                    const totalUsed = currentMonthTransactions
+                        .filter(t => t.category === cat.name && t.type === (cat.is_income ? 'income' : 'expense'))
+                        .reduce((acc, t) => acc + t.amount, 0);
+                        
                     const limit = cat.budget_limit || 0;
-                    const remaining = limit - totalUsed;
+                    const remaining = Math.max(limit - totalUsed, 0);
                     const pct = limit > 0 ? Math.min((totalUsed / limit) * 100, 100) : 0;
                     
                     return (
                         <div key={cat.id} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden group">
                             <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: cat.color}}></div>
-                            <h3 className="text-xs font-bold mb-1 uppercase tracking-wide" style={{color: cat.color}}>{cat.name}</h3>
+                            <h3 className="text-xs font-bold mb-1 uppercase tracking-wide truncate w-full text-center" style={{color: cat.color}}>{cat.name}</h3>
                             <div className="w-16 h-16 relative mb-2">
-                                <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[{v:totalUsed||1},{v:Math.max(limit-totalUsed,0)}]} cx="50%" cy="50%" innerRadius={20} outerRadius={26} startAngle={90} endAngle={-270} dataKey="v" stroke="none"><Cell fill={cat.color}/><Cell fill="#30363d"/></Pie></PieChart></ResponsiveContainer>
+                                <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[{v:totalUsed||1},{v:remaining}]} cx="50%" cy="50%" innerRadius={20} outerRadius={26} startAngle={90} endAngle={-270} dataKey="v" stroke="none"><Cell fill={cat.color}/><Cell fill="#30363d"/></Pie></PieChart></ResponsiveContainer>
                                 <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{pct.toFixed(0)}%</div>
                             </div>
                             <div className="text-center w-full">
                                 <p className="text-lg font-bold">{formatEuro(totalUsed)}</p>
-                                <button onClick={() => setEditingLimit({id: cat.id, name: cat.name, amount: limit})} className="text-[9px] text-slate-500 hover:text-white flex items-center justify-center gap-1 w-full mt-1">Límite: {formatEuro(limit)} <Settings size={10}/></button>
+                                <button onClick={() => setEditingLimit({id: cat.id, name: cat.name, amount: limit})} className="text-[9px] text-slate-500 hover:text-white flex items-center justify-center gap-1 w-full mt-1">
+                                    {cat.is_income ? 'Meta: ' : 'Límite: '}{formatEuro(limit)} <Settings size={10}/>
+                                </button>
                             </div>
                         </div>
                     )
