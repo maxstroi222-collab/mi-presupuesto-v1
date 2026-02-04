@@ -2,8 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, LabelList } from 'recharts';
+import { 
+  Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, 
+  Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
+  Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
+  Activity, CheckCircle, XCircle, Play, Terminal 
+} from 'lucide-react';
+import { 
+  PieChart, Pie, Cell, ResponsiveContainer, 
+  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, LabelList 
+} from 'recharts';
 
 export default function Dashboard() {
   // --- ESTADOS DE USUARIO ---
@@ -35,14 +43,18 @@ export default function Dashboard() {
   // EDICIÓN RÁPIDA DE LÍMITE
   const [editingLimit, setEditingLimit] = useState<{id: number, name: string, amount: number} | null>(null);
 
-  // Estados Admin y Steam
+  // ESTADOS ADMIN Y STEAM
   const [systemAlert, setSystemAlert] = useState({ message: '', active: false });
   const [adminMessageInput, setAdminMessageInput] = useState('');
   const [newSteamItem, setNewSteamItem] = useState({ name: '', quantity: '', price: '' });
   const [fetchingPrice, setFetchingPrice] = useState(false);
   const [refreshingSteam, setRefreshingSteam] = useState(false);
 
-  // Estados Formularios
+  // ESTADOS DIAGNÓSTICO
+  const [diagnosticLogs, setDiagnosticLogs] = useState<{msg: string, status: 'info'|'success'|'error'}[]>([]);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+
+  // ESTADOS FORMULARIOS
   const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0] });
   const [newCatForm, setNewCatForm] = useState({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
 
@@ -203,15 +215,65 @@ export default function Dashboard() {
     if(confirm("¿Borrar caja?")) { await supabase.from('steam_portfolio').delete().eq('id', id); fetchSteamPortfolio(); }
   }
 
-  // --- ADMIN ---
+  // --- ADMIN & DIAGNÓSTICO ---
   async function fetchSystemAlert() {
     const { data } = await supabase.from('system_config').select('*').eq('key_name', 'global_alert').single();
     if (data) { setSystemAlert({ message: data.value, active: data.is_active }); setAdminMessageInput(data.value); }
   }
+
   async function handleSaveAlert(active: boolean) {
     await supabase.from('system_config').update({ value: adminMessageInput, is_active: active }).eq('key_name', 'global_alert');
     fetchSystemAlert();
   }
+
+  const runDiagnostics = async () => {
+    if (isDiagnosing) return;
+    setIsDiagnosing(true);
+    setDiagnosticLogs([]); 
+
+    const addLog = (msg: string, status: 'info'|'success'|'error' = 'info') => {
+        setDiagnosticLogs(prev => [...prev, { msg, status }]);
+    };
+
+    try {
+        addLog("Iniciando sistema de diagnóstico v1.0...", 'info');
+        await new Promise(r => setTimeout(r, 600));
+
+        addLog("Verificando integridad de sesión...", 'info');
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (currentSession) addLog(`Sesión válida. UID: ${currentSession.user.id.slice(0, 8)}...`, 'success');
+        else throw new Error("No hay sesión activa");
+        await new Promise(r => setTimeout(r, 600));
+
+        addLog("Testeando latencia DB (Supabase)...", 'info');
+        const start = performance.now();
+        const { error: dbError } = await supabase.from('user_categories').select('count', { count: 'exact', head: true });
+        const end = performance.now();
+        if (dbError) throw new Error("Fallo conexión DB: " + dbError.message);
+        addLog(`Conexión DB estable (${(end - start).toFixed(2)}ms)`, 'success');
+        await new Promise(r => setTimeout(r, 600));
+
+        addLog("Conectando con Steam Market...", 'info');
+        try {
+            const res = await fetch('/api/steam?name=Recoil%20Case');
+            if (res.status === 200) {
+                const data = await res.json();
+                if(data.lowest_price || data.median_price) addLog("API Steam respondiendo correctamente.", 'success');
+                else addLog("API Steam conecta pero sin precio.", 'error');
+            } else {
+                addLog(`Error HTTP Steam: ${res.status}`, 'error');
+            }
+        } catch (e) { addLog("Fallo crítico API Steam.", 'error'); }
+        await new Promise(r => setTimeout(r, 600));
+
+        addLog("Diagnóstico finalizado.", 'info');
+
+    } catch (error: any) {
+        addLog(error.message || "Error desconocido", 'error');
+    } finally {
+        setIsDiagnosing(false);
+    }
+  };
 
   async function handleAuth() {
     setLoading(true);
@@ -263,7 +325,6 @@ export default function Dashboard() {
 
   // --- FORMATO ---
   const blurClass = privacyMode ? 'blur-[10px] select-none transition-all' : 'transition-all';
-
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
   const isAdmin = session?.user?.app_metadata?.role === 'admin';
@@ -338,13 +399,54 @@ export default function Dashboard() {
              </div>
           )}
 
-          {/* MODAL ADMIN */}
+          {/* MODAL ADMIN & DIAGNÓSTICO */}
           {showAdminPanel && (
             <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4">
-               <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-lg border border-red-500/30">
-                  <div className="flex justify-between mb-4"><h3 className="font-bold text-xl text-red-400">Admin Panel</h3><button onClick={() => setShowAdminPanel(false)}><X/></button></div>
-                  <textarea className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white h-24 mb-4" value={adminMessageInput} onChange={(e) => setAdminMessageInput(e.target.value)}/>
-                  <div className="flex gap-2"><button onClick={() => handleSaveAlert(true)} className="flex-1 bg-emerald-600 py-2 rounded font-bold">Publicar</button><button onClick={() => handleSaveAlert(false)} className="flex-1 bg-slate-700 py-2 rounded font-bold">Ocultar</button></div>
+               <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-2xl border border-red-500/30 flex flex-col max-h-[90vh]">
+                  
+                  <div className="flex justify-between mb-6 border-b border-slate-700 pb-4">
+                      <h3 className="font-bold text-xl text-red-400 flex items-center gap-2">
+                          <Shield size={24}/> Panel de Control - Admin
+                      </h3>
+                      <button onClick={() => setShowAdminPanel(false)}><X className="text-slate-400 hover:text-white"/></button>
+                  </div>
+
+                  <div className="overflow-y-auto pr-2 custom-scrollbar space-y-8">
+                      <div className="space-y-4">
+                          <h4 className="text-white font-bold flex items-center gap-2"><Megaphone size={18} className="text-amber-400"/> Gestión de Avisos</h4>
+                          <textarea className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-white h-20 resize-none text-sm" placeholder="Mensaje para los usuarios..." value={adminMessageInput} onChange={(e) => setAdminMessageInput(e.target.value)}/>
+                          <div className="flex gap-2">
+                              <button onClick={() => handleSaveAlert(true)} className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-600/50 py-2 rounded font-bold text-xs uppercase tracking-wider">Publicar</button>
+                              <button onClick={() => handleSaveAlert(false)} className="flex-1 bg-slate-700/20 hover:bg-slate-700/40 text-slate-400 border border-slate-600/50 py-2 rounded font-bold text-xs uppercase tracking-wider">Ocultar</button>
+                          </div>
+                      </div>
+
+                      <div className="space-y-4 pt-4 border-t border-slate-700">
+                          <div className="flex justify-between items-center">
+                              <h4 className="text-white font-bold flex items-center gap-2"><Activity size={18} className="text-sky-400"/> Diagnóstico del Sistema</h4>
+                              <button onClick={runDiagnostics} disabled={isDiagnosing} className={`flex items-center gap-2 px-3 py-1 rounded text-xs font-bold uppercase tracking-wider transition-all ${isDiagnosing ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-sky-600 hover:bg-sky-500 text-white'}`}>
+                                  {isDiagnosing ? <Loader2 className="animate-spin" size={14}/> : <Play size={14}/>} Ejecutar Test
+                              </button>
+                          </div>
+                          <div className="w-full bg-black rounded-lg border border-slate-700 p-4 font-mono text-xs h-64 overflow-y-auto custom-scrollbar shadow-inner shadow-black/50">
+                              {diagnosticLogs.length === 0 ? (
+                                  <div className="h-full flex flex-col items-center justify-center text-slate-600 gap-2 opacity-50"><Terminal size={32}/><p>Esperando ejecución...</p></div>
+                              ) : (
+                                  <div className="space-y-1">
+                                      {diagnosticLogs.map((log, i) => (
+                                          <div key={i} className="flex gap-2 items-start animate-in fade-in slide-in-from-left-2 duration-300">
+                                              <span className="text-slate-500">[{new Date().toLocaleTimeString().split(' ')[0]}]</span>
+                                              {log.status === 'info' && <span className="text-blue-400">{log.msg}</span>}
+                                              {log.status === 'success' && <span className="text-emerald-400 flex items-center gap-1"><CheckCircle size={12}/> {log.msg}</span>}
+                                              {log.status === 'error' && <span className="text-rose-500 flex items-center gap-1 font-bold"><XCircle size={12}/> {log.msg}</span>}
+                                          </div>
+                                      ))}
+                                      {isDiagnosing && <span className="inline-block w-2 h-4 bg-emerald-500 animate-pulse align-middle ml-1"></span>}
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+                  </div>
                </div>
             </div>
           )}
@@ -376,7 +478,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* MODAL EDITAR LÍMITE */}
+          {/* MODAL EDITAR LÍMITE RÁPIDO */}
           {editingLimit && (
             <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4">
               <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-xs border border-slate-700 text-center">
@@ -422,7 +524,7 @@ export default function Dashboard() {
                         {privacyMode ? <EyeOff size={16}/> : <Eye size={16}/>}
                     </button>
                 </div>
-                <div className="text-right hidden md:block"><p className="text-slate-400 text-xs">Patrimonio Total</p><h2 className={`text-2xl font-bold ${isAdmin ? 'text-white-500' : 'text-emerald-400'} ${blurClass}`}>{formatEuro(netWorth)}</h2></div>
+                <div className="text-right hidden md:block"><p className="text-slate-400 text-xs">Patrimonio Total</p><h2 className={`text-2xl font-bold ${isAdmin ? 'text-red-500' : 'text-emerald-400'} ${blurClass}`}>{formatEuro(netWorth)}</h2></div>
             </div>
 
             <div className="md:col-span-3 space-y-4">
@@ -435,7 +537,7 @@ export default function Dashboard() {
               <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center"><span className="text-slate-400 text-xs">Saldo Líquido</span><span className={`text-white font-mono font-bold ${blurClass}`}>{formatEuro(currentBalance)}</span></div>
               <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center"><span className="text-sky-400 text-xs">Steam Neto</span><span className={`text-white font-mono font-bold ${blurClass}`}>{formatEuro(steamNetValue)}</span></div>
 
-              {/* COMPARATIVA GASTOS (ALTURA REDUCIDA) */}
+              {/* COMPARATIVA MENSUAL (AJUSTADA) */}
               <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 h-[140px]">
                  <h3 className="font-bold text-white text-xs mb-2 flex gap-2 items-center"><TrendingDown size={14} className="text-rose-500"/> Comparativa</h3>
                  <ResponsiveContainer width="100%" height={80}>
@@ -457,7 +559,7 @@ export default function Dashboard() {
                     <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div><h3 className="text-rose-500 text-xs font-medium">GASTOS MES</h3><h2 className={`text-2xl font-bold text-white ${blurClass}`}>{formatEuro(totalExpenses)}</h2></div>
                 </div>
 
-                {/* STEAM GRID (ALTURA REDUCIDA) */}
+                {/* STEAM GRID (AJUSTADA) */}
                 <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 overflow-hidden flex flex-col max-h-[280px]">
                     <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Gamepad2 className="text-sky-400"/> Steam</h3><div className="flex gap-2"><button onClick={refreshAllSteamPrices} disabled={refreshingSteam} className="bg-slate-700 px-2 rounded"><RefreshCw size={12} className={refreshingSteam ? "animate-spin" : ""}/></button><button onClick={() => setShowSteamForm(true)} className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-1 rounded">+ Caja</button></div></div>
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 overflow-y-auto custom-scrollbar">
@@ -484,7 +586,7 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* TARJETAS DINÁMICAS */}
+            {/* TARJETAS DINÁMICAS (MUESTRA TODO) */}
             <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-5 gap-4">
                 {categories.map((cat) => {
                     const totalUsed = currentMonthTransactions
