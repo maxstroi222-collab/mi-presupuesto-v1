@@ -263,7 +263,7 @@ export default function Dashboard() {
 
   // --- FORMATO Y UTILIDADES ---
   // Clase CSS condicional para el modo privacidad
-  const blurClass = privacyMode ? 'blur-[3px] select-none transition-all' : 'transition-all';
+  const blurClass = privacyMode ? 'blur-[6px] select-none transition-all' : 'transition-all';
 
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
