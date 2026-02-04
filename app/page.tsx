@@ -20,13 +20,13 @@ export default function Dashboard() {
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [steamItems, setSteamItems] = useState<any[]>([]);
   
-  // ESTADO CORE: CATEGORÍAS DEL USUARIO (Aquí vive el nombre, color y presupuesto)
+  // ESTADO CORE: CATEGORÍAS DEL USUARIO
   const [categories, setCategories] = useState<any[]>([]);
 
   // MODALES
   const [showForm, setShowForm] = useState(false);
   const [showSteamForm, setShowSteamForm] = useState(false);
-  const [showCatManager, setShowCatManager] = useState(false); // Modal Gestor Categorías
+  const [showCatManager, setShowCatManager] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   
   // EDICIÓN RÁPIDA DE LÍMITE
@@ -41,7 +41,6 @@ export default function Dashboard() {
 
   // Estados Formularios
   const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0] });
-  // Estado para crear nueva categoría
   const [newCatForm, setNewCatForm] = useState({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
 
   // --- MÁQUINA DEL TIEMPO ---
@@ -76,34 +75,24 @@ export default function Dashboard() {
   }, []);
 
   async function loadAllData(userId: string) {
-    await fetchCategories(userId); // Primero cargamos categorías para saber colores y nombres
+    await fetchCategories(userId);
     fetchTransactions();
     fetchSteamPortfolio();
   }
 
-  // --- LÓGICA DE CATEGORÍAS (EL NÚCLEO) ---
+  // --- LÓGICA DE CATEGORÍAS (CORREGIDA: SIN DEFAULT AUTOMÁTICO) ---
   async function fetchCategories(userId: string) {
     const { data } = await supabase.from('user_categories').select('*').order('created_at', { ascending: true });
     
-    if (data && data.length > 0) {
+    if (data) {
         setCategories(data);
-        // Pre-seleccionar la primera categoría en el formulario de gasto
-        if (!newItem.category) setNewItem(prev => ({ ...prev, category: data[0].name }));
-    } else {
-        // SI NO HAY CATEGORÍAS (Usuario Nuevo), CREAMOS LAS POR DEFECTO
-        const defaults = [
-            { user_id: userId, name: 'Nómina', color: '#0ea5e9', is_income: true, budget_limit: 2500 },
-            { user_id: userId, name: 'Variable', color: '#f43f5e', is_income: false, budget_limit: 1200 },
-            { user_id: userId, name: 'Facturas', color: '#fbbf24', is_income: false, budget_limit: 800 },
-            { user_id: userId, name: 'Deuda', color: '#3b82f6', is_income: false, budget_limit: 500 },
-            { user_id: userId, name: 'Inversiones', color: '#8b5cf6', is_income: false, budget_limit: 300 },
-            { user_id: userId, name: 'Ahorro', color: '#10b981', is_income: false, budget_limit: 200 }
-        ];
-        await supabase.from('user_categories').insert(defaults);
-        // Volvemos a cargar
-        const { data: newData } = await supabase.from('user_categories').select('*').order('created_at', { ascending: true });
-        if(newData) setCategories(newData);
+        // Si hay categorías, seleccionamos la primera por defecto para el formulario
+        if (data.length > 0 && !newItem.category) {
+            setNewItem(prev => ({ ...prev, category: data[0].name }));
+        }
     }
+    // AQUÍ ESTABA EL ERROR: Hemos eliminado el "else" que creaba categorías automáticas.
+    // Ahora, si data es vacío, categories se queda vacío [].
   }
 
   async function handleCreateCategory() {
@@ -125,7 +114,7 @@ export default function Dashboard() {
   }
 
   async function handleDeleteCategory(id: number, name: string) {
-    if(!confirm(`¿Borrar categoría "${name}"? Los gastos antiguos se mantendrán pero perderán el color.`)) return;
+    if(!confirm(`¿Borrar categoría "${name}"?`)) return;
     const { error } = await supabase.from('user_categories').delete().eq('id', id);
     if (!error) fetchCategories(session.user.id);
   }
@@ -138,7 +127,7 @@ export default function Dashboard() {
     
     if (!error) {
         setEditingLimit(null);
-        fetchCategories(session.user.id); // Recargar para ver cambios
+        fetchCategories(session.user.id);
     }
   }
 
@@ -181,6 +170,8 @@ export default function Dashboard() {
 
   async function handleAdd() {
     if (!newItem.name || !newItem.amount || !session) return;
+    if (categories.length === 0) { alert("¡Crea una categoría primero!"); return; }
+    
     const { error } = await supabase.from('transactions').insert([{ 
       user_id: session.user.id, name: newItem.name, amount: parseFloat(newItem.amount), 
       type: newItem.type, category: newItem.category, date: new Date(newItem.date).toISOString() 
@@ -259,9 +250,9 @@ export default function Dashboard() {
         <div className="bg-[#161b22] p-8 rounded-2xl border border-slate-800 w-full max-w-sm shadow-2xl text-white">
           <h1 className="text-3xl font-bold mb-6 text-center">Finanzas</h1>
           <div className="space-y-4">
-            {authMode === 'register' && <input type="text" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3" placeholder="Nombre" value={fullName} onChange={e => setFullName(e.target.value)} />}
-            <input type="email" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-            <input type="password" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} />
+            {authMode === 'register' && <input type="text" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white" placeholder="Nombre" value={fullName} onChange={e => setFullName(e.target.value)} />}
+            <input type="email" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+            <input type="password" className="w-full bg-[#0d1117] border border-slate-700 rounded p-3 text-white" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} />
             <button onClick={handleAuth} className="w-full bg-emerald-600 font-bold py-3 rounded-lg">{authMode === 'login' ? 'Entrar' : 'Registrarse'}</button>
             <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-slate-400 text-sm underline">Cambiar modo</button>
           </div>
@@ -284,20 +275,24 @@ export default function Dashboard() {
                     <div className="flex justify-between mb-4 border-b border-slate-700 pb-2"><h3 className="font-bold text-xl flex gap-2"><Settings/> Configurar Categorías</h3><button onClick={() => setShowCatManager(false)}><X/></button></div>
                     
                     {/* Lista Existente */}
-                    <div className="space-y-2 mb-6 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
-                        {categories.map(cat => (
-                            <div key={cat.id} className="flex justify-between items-center bg-[#0d1117] p-3 rounded border border-slate-800">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-4 h-4 rounded-full" style={{backgroundColor: cat.color}}></div>
-                                    <div>
-                                        <p className="font-bold text-sm">{cat.name}</p>
-                                        <p className="text-[10px] text-slate-400">Límite: {formatEuro(cat.budget_limit)} • {cat.is_income ? 'Ingreso' : 'Gasto'}</p>
+                    {categories.length === 0 ? (
+                        <p className="text-slate-500 text-center py-4 italic">No tienes categorías. ¡Crea una!</p>
+                    ) : (
+                        <div className="space-y-2 mb-6 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                            {categories.map(cat => (
+                                <div key={cat.id} className="flex justify-between items-center bg-[#0d1117] p-3 rounded border border-slate-800">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-4 h-4 rounded-full" style={{backgroundColor: cat.color}}></div>
+                                        <div>
+                                            <p className="font-bold text-sm">{cat.name}</p>
+                                            <p className="text-[10px] text-slate-400">Límite: {formatEuro(cat.budget_limit)} • {cat.is_income ? 'Ingreso' : 'Gasto'}</p>
+                                        </div>
                                     </div>
+                                    <button onClick={() => handleDeleteCategory(cat.id, cat.name)} className="text-slate-600 hover:text-rose-500"><Trash2 size={16}/></button>
                                 </div>
-                                <button onClick={() => handleDeleteCategory(cat.id, cat.name)} className="text-slate-600 hover:text-rose-500"><Trash2 size={16}/></button>
-                            </div>
-                        ))}
-                    </div>
+                            ))}
+                        </div>
+                    )}
 
                     {/* Formulario Añadir */}
                     <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700">
@@ -343,9 +338,13 @@ export default function Dashboard() {
                   <div className="grid grid-cols-2 gap-2">
                     <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.type} onChange={e => setNewItem({...newItem, type: e.target.value})}><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
                     {/* LISTA DINÁMICA DE CATEGORÍAS */}
-                    <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
-                        {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                    </select>
+                    {categories.length > 0 ? (
+                        <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
+                            {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                        </select>
+                    ) : (
+                        <div className="bg-rose-900/20 text-rose-400 p-3 rounded text-xs border border-rose-500/30">Crea una categoría primero</div>
+                    )}
                   </div>
                   <button onClick={handleAdd} className="w-full bg-emerald-500 text-black font-bold py-3 rounded-lg">Guardar</button>
                 </div>
@@ -415,14 +414,16 @@ export default function Dashboard() {
                     <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div><h3 className="text-emerald-400 text-xs font-medium">INGRESOS MES</h3><h2 className="text-2xl font-bold text-white">{formatEuro(income)}</h2></div>
                     <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div><h3 className="text-rose-500 text-xs font-medium">GASTOS MES</h3><h2 className="text-2xl font-bold text-white">{formatEuro(totalExpenses)}</h2></div>
                 </div>
+
+                {/* STEAM GRID */}
                 <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 overflow-hidden flex flex-col">
-                    <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Gamepad2 className="text-sky-400"/> Steam</h3><div className="flex gap-2"><button onClick={refreshAllSteamPrices} disabled={refreshingSteam} className="bg-slate-700 px-2 rounded"><RefreshCw size={12} className={refreshingSteam ? "animate-spin" : ""}/></button><button onClick={() => setShowSteamForm(true)} className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-1 rounded">+ Caja</button></div></div>
+                    <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Gamepad2 className="text-sky-400"/> Steam</h3><button onClick={() => setShowSteamForm(true)} className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-1 rounded">+ Caja</button></div>
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 overflow-y-auto custom-scrollbar">
                         {steamItems.map(item => (
                             <div key={item.id} className="bg-[#0d1117] p-2 rounded border border-slate-800 flex flex-col justify-between h-20 relative group">
                                 <button onClick={() => handleDeleteSteam(item.id)} className="absolute top-1 right-1 text-slate-600 opacity-0 group-hover:opacity-100"><Trash2 size={10}/></button>
-                                <p className="text-[10px] text-white truncate" title={item.item_name}>{item.item_name}</p>
-                                <div className="mt-auto flex justify-between items-end border-t border-slate-800 pt-1"><span className="text-[9px] text-slate-500">{item.quantity} ud</span><span className="text-xs font-bold text-sky-400">{formatEuro(item.quantity * item.current_price * 0.85)}</span></div>
+                                <p className="text-[10px] text-white truncate">{item.item_name}</p>
+                                <p className="text-xs font-bold text-sky-400">{formatEuro(item.quantity * item.current_price * 0.85)}</p>
                             </div>
                         ))}
                     </div>
@@ -441,7 +442,7 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* TARJETAS DINÁMICAS */}
+            {/* TARJETAS DINÁMICAS (Solo las de Gasto) */}
             <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-5 gap-4">
                 {categories.filter(c => !c.is_income).map((cat) => {
                     const totalUsed = currentMonthTransactions.filter(t => t.category === cat.name).reduce((acc, t) => acc + t.amount, 0);
@@ -467,6 +468,7 @@ export default function Dashboard() {
             </div>
           </div>
       </div>
+
       <style jsx global>{`.custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }`}</style>
     </div>
   );
