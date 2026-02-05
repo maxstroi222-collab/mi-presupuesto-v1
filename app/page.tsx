@@ -134,7 +134,7 @@ export default function Dashboard() {
         ['Steam (Valor Neto)', formatEuro(steamNetValue)],
       ],
       theme: 'striped',
-      headStyles: { fillColor: [22, 27, 34] } // CORREGIDO: fillColor
+      headStyles: { fillColor: [22, 27, 34] }
     });
 
     // Tabla Detalle
@@ -150,7 +150,7 @@ export default function Dashboard() {
         t.type === 'income' ? 'Ingreso' : 'Gasto',
         formatEuro(t.amount)
       ]),
-      headStyles: { fillColor: [16, 185, 129] } // CORREGIDO: fillColor
+      headStyles: { fillColor: [16, 185, 129] }
     });
 
     doc.save(`Informe_${currentMonthName}_${currentYear}.pdf`);
@@ -350,6 +350,10 @@ export default function Dashboard() {
                     </div>
                     <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700 space-y-3">
                         <div className="grid grid-cols-2 gap-2"><input className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Nombre" value={newCatForm.name} onChange={e => setNewCatForm({...newCatForm, name: e.target.value})}/><input type="number" className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Importe" value={newCatForm.budget_limit} onChange={e => setNewCatForm({...newCatForm, budget_limit: e.target.value})}/></div>
+                        {/* AQUÍ ESTÁ EL CHECKBOX RECUPERADO */}
+                        <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                            <input type="checkbox" checked={newCatForm.is_income} onChange={e => setNewCatForm({...newCatForm, is_income: e.target.checked})}/> Es tipo Ingreso (Ahorro/Nómina)
+                        </label>
                         <div className="flex justify-between items-center"><input type="color" value={newCatForm.color} onChange={e => setNewCatForm({...newCatForm, color: e.target.value})}/><button onClick={handleCreateCategory} className="bg-emerald-600 px-4 py-2 rounded text-sm font-bold">Añadir</button></div>
                     </div>
                 </div>
@@ -363,7 +367,20 @@ export default function Dashboard() {
                   <div className="flex justify-between mb-6 border-b border-slate-700 pb-4"><h3 className="font-bold text-xl text-red-400 flex items-center gap-2"><Shield size={24}/> Admin Panel</h3><button onClick={() => setShowAdminPanel(false)}><X/></button></div>
                   <div className="overflow-y-auto space-y-6">
                       <div className="space-y-4"><h4 className="text-white font-bold flex items-center gap-2"><Megaphone size={18} className="text-amber-400"/> Aviso Global</h4><textarea className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 h-20 text-sm" value={adminMessageInput} onChange={(e) => setAdminMessageInput(e.target.value)}/><div className="flex gap-2"><button onClick={() => handleSaveAlert(true)} className="flex-1 bg-emerald-600/20 text-emerald-400 border border-emerald-600/50 py-2 rounded font-bold">Publicar</button><button onClick={() => handleSaveAlert(false)} className="flex-1 bg-slate-700/20 text-slate-400 border border-slate-600/50 py-2 rounded font-bold">Ocultar</button></div></div>
-                      <div className="space-y-4 pt-4 border-t border-slate-700"><div className="flex justify-between items-center"><h4 className="text-white font-bold flex items-center gap-2"><Activity size={18} className="text-sky-400"/> Consola</h4><button onClick={runDiagnostics} className="bg-sky-600 px-3 py-1 rounded text-xs font-bold">Test</button></div><div className="bg-black p-4 rounded h-64 overflow-y-auto font-mono text-xs">{diagnosticLogs.map((log, i) => <div key={i} className={log.status === 'success' ? 'text-emerald-400' : log.status === 'error' ? 'text-rose-500' : 'text-blue-400'}>{log.msg}</div>)}</div></div>
+                      <div className="space-y-4 pt-4 border-t border-slate-700">
+                          <div className="flex justify-between items-center"><h4 className="text-white font-bold flex items-center gap-2"><Activity size={18} className="text-sky-400"/> Consola</h4><button onClick={runDiagnostics} className="bg-sky-600 px-3 py-1 rounded text-xs font-bold">Test</button></div>
+                          {/* CONSOLA RECUPERADA CON ESTILO MATRIX */}
+                          <div className="bg-black p-4 rounded h-64 overflow-y-auto font-mono text-xs custom-scrollbar">
+                              {diagnosticLogs.length === 0 ? <div className="text-slate-500 italic">Sistema listo...</div> : diagnosticLogs.map((log, i) => (
+                                  <div key={i} className="flex gap-2 items-start mb-1">
+                                      <span className="text-slate-500">[{new Date().toLocaleTimeString().split(' ')[0]}]</span>
+                                      {log.status === 'info' && <span className="text-blue-400">{log.msg}</span>}
+                                      {log.status === 'success' && <span className="text-emerald-400 flex items-center gap-1"><CheckCircle size={12}/> {log.msg}</span>}
+                                      {log.status === 'error' && <span className="text-rose-500 flex items-center gap-1 font-bold"><XCircle size={12}/> {log.msg}</span>}
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
                   </div>
                </div>
             </div>
@@ -377,7 +394,13 @@ export default function Dashboard() {
                 <input type="date" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" value={newItem.date} onChange={e => setNewItem({...newItem, date: e.target.value})} />
                 <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Concepto" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}/>
                 <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Importe" value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}/>
-                <select className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
+                <div className="grid grid-cols-2 gap-2">
+                     {/* INDICADOR DE TIPO RECUPERADO */}
+                     <div className="bg-[#0f172a] border border-slate-600 rounded p-3 text-slate-400 text-center text-sm flex items-center justify-center">
+                        {categories.find(c => c.name === newItem.category)?.is_income ? 'Ingreso (+)' : 'Gasto (-)'}
+                     </div>
+                    <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
+                </div>
                 <button onClick={handleAdd} className="w-full bg-emerald-500 text-black font-bold py-3 rounded-lg">Guardar</button>
               </div>
             </div>
@@ -428,7 +451,6 @@ export default function Dashboard() {
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold flex gap-2"><Gamepad2 className="text-sky-400"/> Steam</h3>
                         <div className="flex gap-2">
-                            {/* BOTÓN REFRESH RECUPERADO AQUÍ */}
                             <button onClick={refreshAllSteamPrices} disabled={refreshingSteam} className="bg-slate-700 px-2 rounded">
                                 <RefreshCw size={12} className={refreshingSteam ? "animate-spin" : ""} />
                             </button>
