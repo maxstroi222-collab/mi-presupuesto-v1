@@ -108,7 +108,7 @@ export default function Dashboard() {
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
 
-  // --- FUNCIÓN EXPORTAR PDF CORREGIDA ---
+  // --- FUNCIÓN EXPORTAR PDF ---
   const exportMonthlyPDF = () => {
     const doc = new jsPDF();
     const title = `Informe Financiero: ${currentMonthName} ${currentYear}`;
@@ -134,8 +134,7 @@ export default function Dashboard() {
         ['Steam (Valor Neto)', formatEuro(steamNetValue)],
       ],
       theme: 'striped',
-      // CORRECCIÓN AQUÍ: fillColor en lugar de fillStyle
-      headStyles: { fillColor: [22, 27, 34] } 
+      headStyles: { fillColor: [22, 27, 34] } // CORREGIDO: fillColor
     });
 
     // Tabla Detalle
@@ -151,8 +150,7 @@ export default function Dashboard() {
         t.type === 'income' ? 'Ingreso' : 'Gasto',
         formatEuro(t.amount)
       ]),
-      // CORRECCIÓN AQUÍ: fillColor en lugar de fillStyle
-      headStyles: { fillColor: [16, 185, 129] } // Verde esmeralda
+      headStyles: { fillColor: [16, 185, 129] } // CORREGIDO: fillColor
     });
 
     doc.save(`Informe_${currentMonthName}_${currentYear}.pdf`);
@@ -427,7 +425,16 @@ export default function Dashboard() {
                     <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div><p className="text-rose-500 text-[10px] font-bold">GASTOS</p><h2 className={`text-xl font-bold ${blurClass}`}>{formatEuro(totalExpenses)}</h2></div>
                 </div>
                 <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex-1 flex flex-col max-h-[280px]">
-                    <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Gamepad2 className="text-sky-400"/> Steam</h3><button onClick={() => setShowSteamForm(true)} className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-1 rounded">+ Caja</button></div>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="font-bold flex gap-2"><Gamepad2 className="text-sky-400"/> Steam</h3>
+                        <div className="flex gap-2">
+                            {/* BOTÓN REFRESH RECUPERADO AQUÍ */}
+                            <button onClick={refreshAllSteamPrices} disabled={refreshingSteam} className="bg-slate-700 px-2 rounded">
+                                <RefreshCw size={12} className={refreshingSteam ? "animate-spin" : ""} />
+                            </button>
+                            <button onClick={() => setShowSteamForm(true)} className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-1 rounded">+ Caja</button>
+                        </div>
+                    </div>
                     <div className="grid grid-cols-2 gap-2 overflow-y-auto custom-scrollbar">
                         {steamItems.map(item => (
                             <div key={item.id} className="bg-[#0d1117] p-2 rounded border border-slate-800 relative group h-20 flex flex-col justify-between">
