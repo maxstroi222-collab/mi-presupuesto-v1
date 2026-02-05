@@ -154,7 +154,7 @@ export default function Dashboard() {
     if(!newSteamItem.name) return;
     setFetchingPrice(true);
     try {
-        const res = await fetch(`/api/steam?name=${encodeURIComponent(newSteamItem.name)}`);
+        const res = await fetch(`/apii/steam?name=${encodeURIComponent(newSteamItem.name)}`);
         const data = await res.json();
         const p = data.lowest_price || data.median_price;
         if (p) setNewSteamItem(prev => ({ ...prev, price: parseSteamPrice(p).toString() }));
