@@ -67,8 +67,8 @@ export default function Dashboard() {
   const goToNextMonth = () => setCurrentDate(new Date(currentYear, currentMonthIndex + 1, 1));
   const goToToday = () => setCurrentDate(new Date());
 
-  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  const currentMonthName = capitalize(currentDate.toLocaleString('es-ES', { month: 'long' }));
+  const ctalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const currentMonthName = ctalize(currentDate.toLocaleString('es-ES', { month: 'long' }));
   const THEME = { bg: '#0d1117', card: '#161b22', text: '#ffffff' };
 
   // 1. CARGA INICIAL
@@ -154,7 +154,7 @@ export default function Dashboard() {
     if(!newSteamItem.name) return;
     setFetchingPrice(true);
     try {
-        const res = await fetch(`/apii/steam?name=${encodeURIComponent(newSteamItem.name)}`);
+        const res = await fetch(`/api/steam?name=${encodeURIComponent(newSteamItem.name)}`);
         const data = await res.json();
         const p = data.lowest_price || data.median_price;
         if (p) setNewSteamItem(prev => ({ ...prev, price: parseSteamPrice(p).toString() }));
