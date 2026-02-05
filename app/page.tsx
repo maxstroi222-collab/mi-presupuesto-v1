@@ -359,8 +359,8 @@ export default function Dashboard() {
                                 value={newCatForm.is_income ? 'income' : 'expense'} 
                                 onChange={e => setNewCatForm({...newCatForm, is_income: e.target.value === 'income'})}
                              >
-                                <option value="expense" className="bg-[#1e293b]">Gasto (Resta)</option>
-                                <option value="income" className="bg-[#1e293b]">Ingreso (Suma)</option>
+                                <option value="expense" className="bg-[#1e293b]">Gasto</option>
+                                <option value="income" className="bg-[#1e293b]">Ingreso</option>
                              </select>
                         </div>
 
