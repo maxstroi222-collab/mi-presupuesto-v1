@@ -2,15 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-// Importamos las librerías para el PDF
+// IMPORTS PARA PDF
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
 import { 
   Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, 
   Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal 
 } from 'lucide-react';
+
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, 
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, LabelList 
@@ -66,19 +68,21 @@ export default function Dashboard() {
 
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const currentMonthName = capitalize(currentDate.toLocaleString('es-ES', { month: 'long' }));
-  const THEME = { bg: '#0d1117', card: '#161b22', text: '#ffffff' };
-
+  
+  // 1. CARGA INICIAL
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if(session) loadAllData(session.user.id);
       setLoading(false);
     });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if(session) loadAllData(session.user.id);
       else { setAllTransactions([]); setSteamItems([]); setCategories([]); }
     });
+    
     fetchSystemAlert();
     return () => subscription.unsubscribe();
   }, []);
@@ -89,43 +93,72 @@ export default function Dashboard() {
     fetchSteamPortfolio();
   }
 
-  // --- FUNCIÓN DE EXPORTACIÓN A PDF ---
+  // --- CÁLCULOS GENERALES PARA USAR EN EL PDF ---
+  const currentMonthTransactions = allTransactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
+  });
+
+  const income = currentMonthTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+  const totalExpenses = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+  const steamNetValue = steamItems.reduce((acc, i) => acc + (i.quantity * i.current_price), 0) * 0.85;
+  const currentBalance = allTransactions.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
+  const netWorth = currentBalance + steamNetValue;
+
+  const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
+  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
+
+  // --- FUNCIÓN EXPORTAR PDF CORREGIDA ---
   const exportMonthlyPDF = () => {
     const doc = new jsPDF();
     const title = `Informe Financiero: ${currentMonthName} ${currentYear}`;
-    
+    const dateStr = new Date().toLocaleString();
+
+    // Cabecera
     doc.setFontSize(18);
     doc.text(title, 14, 20);
+    
     doc.setFontSize(10);
     doc.text(`Usuario: ${userName}`, 14, 28);
-    doc.text(`Patrimonio Total: ${formatEuro(netWorth)}`, 14, 33);
+    doc.text(`Generado: ${dateStr}`, 14, 33);
+    doc.text(`Patrimonio Total: ${formatEuro(netWorth)}`, 14, 38);
 
+    // Tabla Resumen
     autoTable(doc, {
-      startY: 40,
-      head: [['Resumen', 'Valor']],
+      startY: 45,
+      head: [['Concepto', 'Valor']],
       body: [
         ['Ingresos Mes', formatEuro(income)],
         ['Gastos Mes', formatEuro(totalExpenses)],
-        ['Balance', formatEuro(income - totalExpenses)],
-        ['Steam Neto', formatEuro(steamNetValue)],
+        ['Balance Neto', formatEuro(income - totalExpenses)],
+        ['Steam (Valor Neto)', formatEuro(steamNetValue)],
       ],
-      headStyles: { fillStyle: [16, 27, 42] }
+      theme: 'striped',
+      // CORRECCIÓN AQUÍ: fillColor en lugar de fillStyle
+      headStyles: { fillColor: [22, 27, 34] } 
     });
 
+    // Tabla Detalle
+    doc.text("Detalle de Movimientos", 14, (doc as any).lastAutoTable.finalY + 10);
+
     autoTable(doc, {
-      startY: (doc as any).lastAutoTable.finalY + 10,
-      head: [['Fecha', 'Concepto', 'Categoria', 'Importe']],
+      startY: (doc as any).lastAutoTable.finalY + 15,
+      head: [['Fecha', 'Concepto', 'Categoria', 'Tipo', 'Importe']],
       body: currentMonthTransactions.map(t => [
-        new Date(t.date).toLocaleDateString(),
+        new Date(t.date).toLocaleDateString('es-ES'),
         t.name,
         t.category,
-        formatEuro(t.type === 'income' ? t.amount : -t.amount)
+        t.type === 'income' ? 'Ingreso' : 'Gasto',
+        formatEuro(t.amount)
       ]),
-      headStyles: { fillStyle: [40, 167, 69] }
+      // CORRECCIÓN AQUÍ: fillColor en lugar de fillStyle
+      headStyles: { fillColor: [16, 185, 129] } // Verde esmeralda
     });
 
     doc.save(`Informe_${currentMonthName}_${currentYear}.pdf`);
   };
+
+  // --- RESTO DE FUNCIONES ---
 
   async function fetchCategories(userId: string) {
     const { data } = await supabase.from('user_categories').select('*').order('created_at', { ascending: true });
@@ -233,18 +266,28 @@ export default function Dashboard() {
     setDiagnosticLogs([]);
     const addLog = (msg: string, status: 'info'|'success'|'error' = 'info') => setDiagnosticLogs(prev => [...prev, { msg, status }]);
     
-    addLog("Iniciando diagnóstico...", 'info');
-    await new Promise(r => setTimeout(r, 600));
-    const { data: { session: s } } = await supabase.auth.getSession();
-    if (s) addLog("Sesión activa OK", 'success');
-    else addLog("Error de sesión", 'error');
-    
-    addLog("Comprobando base de datos...", 'info');
-    const { error } = await supabase.from('user_categories').select('id').limit(1);
-    if (!error) addLog("DB Conectada", 'success');
-    else addLog("Error de conexión DB", 'error');
+    try {
+      addLog("Iniciando diagnóstico...", 'info');
+      await new Promise(r => setTimeout(r, 600));
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (s) addLog("Sesión activa OK", 'success');
+      else throw new Error("Sin sesión");
+      
+      addLog("Probando conexión DB...", 'info');
+      const { error } = await supabase.from('user_categories').select('id').limit(1);
+      if (!error) addLog("DB Conectada", 'success');
+      else addLog("Error DB", 'error');
 
-    setIsDiagnosing(false);
+      addLog("Probando Steam API...", 'info');
+      const res = await fetch('/api/steam?name=Recoil%20Case');
+      if(res.ok) addLog("Steam API OK", 'success');
+      else addLog("Fallo Steam API", 'error');
+
+    } catch(e: any) {
+      addLog(e.message, 'error');
+    } finally {
+      setIsDiagnosing(false);
+    }
   };
 
   async function handleAuth() {
@@ -259,18 +302,7 @@ export default function Dashboard() {
     setLoading(false);
   }
 
-  // --- CÁLCULOS ---
-  const currentMonthTransactions = allTransactions.filter(t => {
-    const d = new Date(t.date);
-    return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
-  });
-
-  const income = currentMonthTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-  const totalExpenses = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-  const steamNetValue = steamItems.reduce((acc, i) => acc + (i.quantity * i.current_price), 0) * 0.85;
-  const currentBalance = allTransactions.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
-  const netWorth = currentBalance + steamNetValue;
-
+  // --- VARIABLES DE UI ---
   const lastMonthDate = new Date(currentYear, currentMonthIndex - 1, 1);
   const lastMonthExpenses = allTransactions.filter(t => {
       const d = new Date(t.date);
@@ -280,8 +312,6 @@ export default function Dashboard() {
   const comparisonData = [{ name: 'Mes Pasado', amount: lastMonthExpenses }, { name: 'Este Mes', amount: totalExpenses }];
 
   const blurClass = privacyMode ? 'blur-[10px] select-none transition-all' : 'transition-all';
-  const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
-  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
   const isAdmin = session?.user?.app_metadata?.role === 'admin';
 
   if (!session) return (
@@ -377,7 +407,6 @@ export default function Dashboard() {
               <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center"><span className="text-slate-400 text-xs">Saldo Líquido</span><span className={`font-mono font-bold ${blurClass}`}>{formatEuro(currentBalance)}</span></div>
               <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center"><span className="text-sky-400 text-xs">Steam Neto</span><span className={`font-mono font-bold ${blurClass}`}>{formatEuro(steamNetValue)}</span></div>
               
-              {/* COMPARATIVA GASTOS */}
               <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 h-[140px]">
                  <h3 className="font-bold text-xs mb-2 flex gap-2"><TrendingDown size={14} className="text-rose-500"/> Comparativa</h3>
                  <ResponsiveContainer width="100%" height={80}>
@@ -412,7 +441,7 @@ export default function Dashboard() {
             </div>
 
             <div className="md:col-span-4 bg-[#161b22] rounded-xl border border-slate-800 p-4 flex flex-col h-[400px]">
-                <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Calendar className="text-slate-400"/> Historial</h3><button onClick={exportMonthlyPDF} className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 font-bold">PDF</button></div>
+                <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Calendar className="text-slate-400"/> Historial</h3><button onClick={exportMonthlyPDF} className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 font-bold hover:bg-emerald-500 hover:text-black transition flex items-center gap-1"><Save size={12}/> PDF</button></div>
                 <div className="overflow-y-auto flex-1 space-y-2 custom-scrollbar">
                     {currentMonthTransactions.map(t => (
                         <div key={t.id} className="flex justify-between items-center p-2 rounded bg-[#0d1117] border border-slate-800 group text-xs">
