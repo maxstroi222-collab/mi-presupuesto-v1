@@ -350,10 +350,20 @@ export default function Dashboard() {
                     </div>
                     <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700 space-y-3">
                         <div className="grid grid-cols-2 gap-2"><input className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Nombre" value={newCatForm.name} onChange={e => setNewCatForm({...newCatForm, name: e.target.value})}/><input type="number" className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Importe" value={newCatForm.budget_limit} onChange={e => setNewCatForm({...newCatForm, budget_limit: e.target.value})}/></div>
-                        {/* AQUÍ ESTÁ EL CHECKBOX RECUPERADO */}
-                        <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
-                            <input type="checkbox" checked={newCatForm.is_income} onChange={e => setNewCatForm({...newCatForm, is_income: e.target.checked})}/> Es tipo Ingreso (Ahorro/Nómina)
-                        </label>
+                        
+                        {/* SELECTOR TIPO GASTO/INGRESO (CORREGIDO) */}
+                        <div className="bg-[#1e293b] border border-slate-600 rounded p-2">
+                             <label className="text-xs text-slate-400 block mb-1">Tipo de Categoría</label>
+                             <select 
+                                className="w-full bg-transparent text-white text-sm outline-none cursor-pointer"
+                                value={newCatForm.is_income ? 'income' : 'expense'} 
+                                onChange={e => setNewCatForm({...newCatForm, is_income: e.target.value === 'income'})}
+                             >
+                                <option value="expense" className="bg-[#1e293b]">Gasto (Resta)</option>
+                                <option value="income" className="bg-[#1e293b]">Ingreso (Suma)</option>
+                             </select>
+                        </div>
+
                         <div className="flex justify-between items-center"><input type="color" value={newCatForm.color} onChange={e => setNewCatForm({...newCatForm, color: e.target.value})}/><button onClick={handleCreateCategory} className="bg-emerald-600 px-4 py-2 rounded text-sm font-bold">Añadir</button></div>
                     </div>
                 </div>
@@ -369,9 +379,8 @@ export default function Dashboard() {
                       <div className="space-y-4"><h4 className="text-white font-bold flex items-center gap-2"><Megaphone size={18} className="text-amber-400"/> Aviso Global</h4><textarea className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 h-20 text-sm" value={adminMessageInput} onChange={(e) => setAdminMessageInput(e.target.value)}/><div className="flex gap-2"><button onClick={() => handleSaveAlert(true)} className="flex-1 bg-emerald-600/20 text-emerald-400 border border-emerald-600/50 py-2 rounded font-bold">Publicar</button><button onClick={() => handleSaveAlert(false)} className="flex-1 bg-slate-700/20 text-slate-400 border border-slate-600/50 py-2 rounded font-bold">Ocultar</button></div></div>
                       <div className="space-y-4 pt-4 border-t border-slate-700">
                           <div className="flex justify-between items-center"><h4 className="text-white font-bold flex items-center gap-2"><Activity size={18} className="text-sky-400"/> Consola</h4><button onClick={runDiagnostics} className="bg-sky-600 px-3 py-1 rounded text-xs font-bold">Test</button></div>
-                          {/* CONSOLA RECUPERADA CON ESTILO MATRIX */}
                           <div className="bg-black p-4 rounded h-64 overflow-y-auto font-mono text-xs custom-scrollbar">
-                              {diagnosticLogs.length === 0 ? <div className="text-slate-500 italic">Sistema listo...</div> : diagnosticLogs.map((log, i) => (
+                              {diagnosticLogs.length === 0 ? <div className="text-slate-500 italic flex items-center gap-2"><Terminal size={14}/> Esperando comando...</div> : diagnosticLogs.map((log, i) => (
                                   <div key={i} className="flex gap-2 items-start mb-1">
                                       <span className="text-slate-500">[{new Date().toLocaleTimeString().split(' ')[0]}]</span>
                                       {log.status === 'info' && <span className="text-blue-400">{log.msg}</span>}
@@ -395,7 +404,6 @@ export default function Dashboard() {
                 <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Concepto" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}/>
                 <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Importe" value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}/>
                 <div className="grid grid-cols-2 gap-2">
-                     {/* INDICADOR DE TIPO RECUPERADO */}
                      <div className="bg-[#0f172a] border border-slate-600 rounded p-3 text-slate-400 text-center text-sm flex items-center justify-center">
                         {categories.find(c => c.name === newItem.category)?.is_income ? 'Ingreso (+)' : 'Gasto (-)'}
                      </div>
@@ -431,10 +439,11 @@ export default function Dashboard() {
               <div className="bg-[#161b22] p-4 rounded-xl border border-slate-800 h-[140px]">
                  <h3 className="font-bold text-xs mb-2 flex gap-2"><TrendingDown size={14} className="text-rose-500"/> Comparativa</h3>
                  <ResponsiveContainer width="100%" height={80}>
-                    <BarChart layout="vertical" data={comparisonData} margin={{ left: 40 }}>
-                        <XAxis type="number" hide />
+                    <BarChart layout="vertical" data={comparisonData} margin={{ left: 40, right: 45 }}>
+                        <XAxis type="number" hide domain={[0, 'auto']} />
                         <YAxis dataKey="name" type="category" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false}/>
-                        <Bar dataKey="amount" fill="#f43f5e" barSize={20} radius={[0, 4, 4, 0]}>
+                        <RechartsTooltip cursor={{fill: 'transparent'}} contentStyle={{backgroundColor: '#1e293b', border: 'none', borderRadius: '8px'}} itemStyle={{color: '#fff', fontSize:'12px'}} formatter={(value:any) => formatEuro(value)}/>
+                        <Bar dataKey="amount" fill="#f43f5e" barSize={18} radius={[0, 4, 4, 0]}>
                             <LabelList dataKey="amount" position="right" fontSize={10} fill="#fff" formatter={(val:any) => privacyMode ? '****' : formatEuro(val)}/>
                         </Bar>
                     </BarChart>
@@ -462,7 +471,10 @@ export default function Dashboard() {
                             <div key={item.id} className="bg-[#0d1117] p-2 rounded border border-slate-800 relative group h-20 flex flex-col justify-between">
                                 <button onClick={() => handleDeleteSteam(item.id)} className="absolute top-1 right-1 opacity-0 group-hover:opacity-100"><Trash2 size={10}/></button>
                                 <p className="text-[10px] truncate">{item.item_name}</p>
-                                <p className={`text-xs font-bold text-sky-400 ${blurClass}`}>{formatEuro(item.quantity * item.current_price * 0.85)}</p>
+                                <div className="flex justify-between items-end">
+                                    <div className="text-[9px] text-slate-500 flex flex-col"><span>{item.quantity} ud.</span><span>{formatEuro(item.current_price)}/u</span></div>
+                                    <p className={`text-xs font-bold text-sky-400 ${blurClass}`}>{formatEuro(item.quantity * item.current_price * 0.85)}</p>
+                                </div>
                             </div>
                         ))}
                     </div>
