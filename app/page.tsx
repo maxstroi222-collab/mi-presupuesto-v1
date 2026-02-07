@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react'; // AÑADIDO useRef
 import { supabase } from './supabase';
 // IMPORTS PARA PDF
 import jsPDF from 'jspdf';
@@ -11,7 +11,7 @@ import {
   Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, UserCog, Power // ICONOS NUEVOS PARA ADMIN
+  Users, Ban, Lock, Unlock // ICONOS NUEVOS
 } from 'lucide-react';
 
 import { 
@@ -39,9 +39,12 @@ export default function Dashboard() {
   const [privacyMode, setPrivacyMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // ESTADOS DE IMPERSONACIÓN (GOD MODE) - NUEVO
+  // ESTADOS DE IMPERSONACIÓN (GOD MODE)
   const [impersonatedUser, setImpersonatedUser] = useState<{id: string, email: string} | null>(null);
-  const [usersList, setUsersList] = useState<any[]>([]); // Lista de usuarios para el admin
+  // REF PARA EL BUG DE LA PESTAÑA (Mantiene el valor aunque el componente se renderice)
+  const impersonatingRef = useRef<{id: string, email: string} | null>(null);
+
+  const [usersList, setUsersList] = useState<any[]>([]); 
 
   // MODALES
   const [showForm, setShowForm] = useState(false);
@@ -49,7 +52,7 @@ export default function Dashboard() {
   const [showCatManager, setShowCatManager] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
-  const [showUsersTable, setShowUsersTable] = useState(false); // NUEVO: Modal tabla usuarios
+  const [showUsersTable, setShowUsersTable] = useState(false);
   
   const [editingLimit, setEditingLimit] = useState<{id: number, name: string, amount: number} | null>(null);
 
@@ -87,31 +90,49 @@ export default function Dashboard() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if(session) loadAllData(session.user.id);
+      if(session) {
+          // Chequear si el usuario está baneado al cargar
+          if(session.user.user_metadata?.banned) {
+              alert("Tu cuenta ha sido suspendida.");
+              supabase.auth.signOut();
+              return;
+          }
+          loadAllData(session.user.id);
+      }
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      // FIX CRÍTICO: Si estamos impersonando, NO recargar datos de sesión original
+      if (impersonatingRef.current) return;
+
       setSession(session);
-      if(session) loadAllData(session.user.id);
-      else { setAllTransactions([]); setSteamItems([]); setCategories([]); }
+      if(session) {
+           if(session.user.user_metadata?.banned) {
+              alert("Tu cuenta ha sido suspendida.");
+              supabase.auth.signOut();
+              return;
+          }
+          loadAllData(session.user.id);
+      } else { 
+          setAllTransactions([]); setSteamItems([]); setCategories([]); 
+      }
     });
     
     fetchSystemAlert();
     return () => subscription.unsubscribe();
   }, []);
 
-  // --- FUNCIÓN DE CARGA INTELIGENTE (Soporta Impersonación) ---
   async function loadAllData(userId: string) {
-    // Si estamos impersonando, usamos el ID del usuario objetivo, si no, el de la sesión
-    const targetId = impersonatedUser ? impersonatedUser.id : userId;
+    // Si la referencia tiene valor, usamos ESE id, no el de la sesión
+    const targetId = impersonatingRef.current ? impersonatingRef.current.id : userId;
 
     await fetchCategories(targetId);
     fetchTransactions(targetId);
     fetchSteamPortfolio(targetId);
   }
 
-  // --- DATOS FILTRADOS DEL MES ---
+  // --- DATOS FILTRADOS ---
   const currentMonthTransactions = allTransactions.filter(t => {
     const d = new Date(t.date);
     return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
@@ -132,15 +153,13 @@ export default function Dashboard() {
 
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   
-  // Nombre a mostrar: Si impersonamos mostramos el email del usuario, si no el nuestro
   const displayUserName = impersonatedUser 
       ? `(Viendo a) ${impersonatedUser.email}` 
       : (session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0]);
 
-  // --- FUNCIONES ADMIN NUEVAS ---
+  // --- FUNCIONES ADMIN ---
   
   const fetchUsersList = async () => {
-      // Llama a la función SQL que creamos
       const { data, error } = await supabase.rpc('get_admin_users_list');
       if (data) setUsersList(data);
       if (error) alert("Error cargando usuarios: " + error.message);
@@ -149,13 +168,16 @@ export default function Dashboard() {
   const startImpersonation = (targetUser: any) => {
       if(!confirm(`¿Estás seguro de que quieres entrar como ${targetUser.email}?`)) return;
       
-      setImpersonatedUser({ id: targetUser.id, email: targetUser.email });
-      setUsersList([]); // Limpiar lista
-      setShowUsersTable(false); // Cerrar modal usuarios
-      setShowAdminPanel(false); // Cerrar panel admin
+      const target = { id: targetUser.id, email: targetUser.email };
       
-      // Recargar datos con el ID del usuario objetivo
-      // NOTA: Pasamos el ID directamente para forzar la carga
+      setImpersonatedUser(target);
+      impersonatingRef.current = target; // ACTUALIZAR REFERENCIA
+
+      setUsersList([]); 
+      setShowUsersTable(false); 
+      setShowAdminPanel(false); 
+      
+      // Cargar datos del objetivo
       fetchCategories(targetUser.id);
       fetchTransactions(targetUser.id);
       fetchSteamPortfolio(targetUser.id);
@@ -163,11 +185,22 @@ export default function Dashboard() {
 
   const stopImpersonation = () => {
       setImpersonatedUser(null);
-      // Recargar datos con MI ID original
+      impersonatingRef.current = null; // LIMPIAR REFERENCIA
       if (session) loadAllData(session.user.id);
   };
 
-  // --- RESTO DE FUNCIONES (ADAPTADAS PARA RECIBIR ID OPCIONAL) ---
+  const toggleBanUser = async (userId: string, currentStatus: boolean, email: string) => {
+      if(!confirm(`¿${currentStatus ? 'Desbanear' : 'Banear'} a ${email}?`)) return;
+      
+      const { error } = await supabase.rpc('toggle_ban_user', { target_user_id: userId });
+      if(!error) {
+          fetchUsersList(); // Recargar lista
+      } else {
+          alert("Error al banear: " + error.message);
+      }
+  };
+
+  // --- RESTO DE FUNCIONES (USANDO REF PARA ID) ---
 
   async function fetchCategories(userId: string) {
     const { data } = await supabase.from('user_categories').select('*').eq('user_id', userId).order('created_at', { ascending: true });
@@ -178,25 +211,21 @@ export default function Dashboard() {
   }
 
   async function fetchTransactions(userId?: string) {
-    // Usamos el ID pasado O el ID de la sesión (para mantener compatibilidad)
-    const uid = userId || (impersonatedUser ? impersonatedUser.id : session?.user?.id);
+    const uid = userId || (impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id);
     if(!uid) return;
-
     const { data } = await supabase.from('transactions').select('*').eq('user_id', uid).order('date', { ascending: false });
     if (data) setAllTransactions(data);
   }
 
   async function fetchSteamPortfolio(userId?: string) {
-    const uid = userId || (impersonatedUser ? impersonatedUser.id : session?.user?.id);
+    const uid = userId || (impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id);
     if(!uid) return;
-
     const { data } = await supabase.from('steam_portfolio').select('*').eq('user_id', uid);
     if (data) setSteamItems(data);
   }
 
-  // Las funciones de crear/borrar deben usar el ID correcto
   async function handleCreateCategory() {
-    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     if (!newCatForm.name || !uid) return;
     await supabase.from('user_categories').insert([{ user_id: uid, name: newCatForm.name, color: newCatForm.color, is_income: newCatForm.is_income, budget_limit: parseFloat(newCatForm.budget_limit) || 0 }]);
     setNewCatForm({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
@@ -204,7 +233,7 @@ export default function Dashboard() {
   }
 
   async function handleDeleteCategory(id: number, name: string) {
-    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     if(confirm(`¿Borrar "${name}"?`)) {
       await supabase.from('user_categories').delete().eq('id', id);
       fetchCategories(uid);
@@ -212,14 +241,13 @@ export default function Dashboard() {
   }
 
   async function handleUpdateLimit() {
-    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     if (!editingLimit || !uid) return;
     await supabase.from('user_categories').update({ budget_limit: editingLimit.amount }).eq('id', editingLimit.id);
     setEditingLimit(null);
     fetchCategories(uid);
   }
 
-  // --- MANEJO DE PRECIOS STEAM ---
   const parseSteamPrice = (priceStr: string) => {
     let clean = priceStr.replace('€', '').replace('$', '').replace(',', '.').trim();
     clean = clean.replace('--', '00').replace('-', '00');
@@ -246,13 +274,13 @@ export default function Dashboard() {
         const p = data.lowest_price || data.median_price;
         if (p) await supabase.from('steam_portfolio').update({ current_price: parseSteamPrice(p) }).eq('id', item.id);
     }
-    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     fetchSteamPortfolio(uid);
     setRefreshingSteam(false);
   }
 
   async function handleAdd() {
-    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     if (!newItem.name || !newItem.amount || !uid) return;
     const selectedCat = categories.find(c => c.name === newItem.category);
     const type = selectedCat?.is_income ? 'income' : 'expense';
@@ -273,23 +301,22 @@ export default function Dashboard() {
   }
 
   async function handleDelete(id: number) {
-    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     if(confirm("¿Borrar?")) { await supabase.from('transactions').delete().eq('id', id); fetchTransactions(uid); }
   }
 
   async function handleAddSteam() {
-    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     if(!uid) return;
     await supabase.from('steam_portfolio').insert([{ user_id: uid, item_name: newSteamItem.name, quantity: parseInt(newSteamItem.quantity), current_price: parseFloat(newSteamItem.price) }]);
     setShowSteamForm(false); fetchSteamPortfolio(uid);
   }
 
   async function handleDeleteSteam(id: number) {
-    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     if(confirm("¿Borrar caja?")) { await supabase.from('steam_portfolio').delete().eq('id', id); fetchSteamPortfolio(uid); }
   }
 
-  // --- PDF ---
   const generatePDF = () => {
     let dataToExport = currentMonthTransactions;
     let subtitle = "Informe Completo";
@@ -316,7 +343,7 @@ export default function Dashboard() {
     doc.text(subtitle, 14, 26);
     
     doc.setTextColor(0);
-    doc.text(`Usuario: ${displayUserName}`, 14, 34); // Usamos el nombre a mostrar
+    doc.text(`Usuario: ${displayUserName}`, 14, 34); 
     doc.text(`Generado: ${dateStr}`, 14, 39);
 
     autoTable(doc, {
@@ -402,8 +429,16 @@ export default function Dashboard() {
   async function handleAuth() {
     setLoading(true);
     if (authMode === 'login') {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) alert(error.message);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+           alert(error.message);
+      } else {
+          // Chequeo extra por si acaba de loguearse alguien baneado
+          if(data.session?.user.user_metadata?.banned) {
+              await supabase.auth.signOut();
+              alert("Esta cuenta está baneada por el administrador.");
+          }
+      }
     } else {
       const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
       if (error) alert(error.message); else alert("Creado.");
@@ -439,12 +474,11 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen font-sans text-white flex flex-col bg-[#0d1117]">
-      {/* BANNER DE AVISO GLOBAL */}
       {systemAlert.active && <div className="bg-amber-500/10 border-b border-amber-500/20 py-2 text-center text-amber-400 text-sm font-bold"><Megaphone className="inline mr-2" size={16}/>{systemAlert.message}</div>}
       
-      {/* BANNER DE IMPERSONACIÓN (SOLO SI ESTÁ ACTIVO) */}
+      {/* BANNER DE IMPERSONACIÓN */}
       {impersonatedUser && (
-         <div className="bg-orange-600/20 border-b border-orange-500 py-2 px-4 flex justify-between items-center text-orange-400 animate-pulse">
+         <div className="bg-orange-600/20 border-b border-orange-500 py-2 px-4 flex justify-between items-center text-orange-400 animate-pulse sticky top-0 z-[100]">
             <span className="font-bold flex items-center gap-2"><Eye size={18}/> VIENDO COMO: {impersonatedUser.email}</span>
             <button onClick={stopImpersonation} className="bg-orange-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-orange-500 transition flex items-center gap-1"><LogOut size={12}/> SALIR DEL MODO</button>
          </div>
@@ -514,9 +548,8 @@ export default function Dashboard() {
                   <div className="flex justify-between mb-6 border-b border-slate-700 pb-4"><h3 className="font-bold text-xl text-red-400 flex items-center gap-2"><Shield size={24}/> Admin Panel</h3><button onClick={() => setShowAdminPanel(false)}><X/></button></div>
                   <div className="overflow-y-auto space-y-6">
                       
-                      {/* BOTÓN GESTIÓN USUARIOS (NUEVO) */}
                       <button onClick={() => { fetchUsersList(); setShowUsersTable(true); }} className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center hover:bg-slate-700 transition group">
-                          <div className="flex items-center gap-3"><div className="bg-sky-500/20 p-2 rounded-lg"><Users className="text-sky-400"/></div><div className="text-left"><p className="font-bold text-white">Gestionar Usuarios</p><p className="text-xs text-slate-400">Ver listado y acceder como usuario</p></div></div>
+                          <div className="flex items-center gap-3"><div className="bg-sky-500/20 p-2 rounded-lg"><Users className="text-sky-400"/></div><div className="text-left"><p className="font-bold text-white">Gestionar Usuarios</p><p className="text-xs text-slate-400">Ver listado, impersonar y banear</p></div></div>
                           <ChevronRight className="text-slate-500 group-hover:text-white"/>
                       </button>
 
@@ -539,10 +572,10 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* MODAL LISTA DE USUARIOS (NUEVO) */}
+          {/* MODAL LISTA DE USUARIOS (CON BAN) */}
           {showUsersTable && (
             <div className="fixed inset-0 bg-black/90 z-[80] flex items-center justify-center p-4">
-                <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-4xl border border-slate-700 h-[80vh] flex flex-col">
+                <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-5xl border border-slate-700 h-[80vh] flex flex-col">
                     <div className="flex justify-between mb-4 border-b border-slate-700 pb-2">
                         <h3 className="font-bold text-xl flex items-center gap-2 text-white"><Users className="text-sky-400"/> Usuarios Registrados</h3>
                         <button onClick={() => setShowUsersTable(false)}><X className="text-slate-400 hover:text-white"/></button>
@@ -553,23 +586,36 @@ export default function Dashboard() {
                                 <tr className="text-slate-500 text-xs uppercase border-b border-slate-700">
                                     <th className="p-3">Email</th>
                                     <th className="p-3">Último Acceso</th>
-                                    <th className="p-3">Transacciones</th>
+                                    <th className="p-3 text-center">Transacciones</th>
+                                    <th className="p-3 text-center">Estado</th>
                                     <th className="p-3 text-right">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {usersList.length === 0 ? (
-                                    <tr><td colSpan={4} className="p-4 text-center text-slate-500 italic">No se encontraron usuarios o error de permisos.</td></tr>
+                                    <tr><td colSpan={5} className="p-4 text-center text-slate-500 italic">Cargando o sin permisos...</td></tr>
                                 ) : (
                                     usersList.map((user: any) => (
                                         <tr key={user.id} className="border-b border-slate-800 hover:bg-slate-800/50 transition">
-                                            <td className="p-3 text-sm font-bold text-white">{user.email}</td>
+                                            <td className="p-3 text-sm font-bold text-white">
+                                                {user.email}
+                                                {user.is_banned && <span className="ml-2 text-[10px] bg-red-500/20 text-red-400 px-1 rounded border border-red-500/30">BANEADO</span>}
+                                            </td>
                                             <td className="p-3 text-xs text-slate-400">{new Date(user.last_sign_in_at).toLocaleDateString()}</td>
-                                            <td className="p-3 text-xs text-slate-400">{user.total_transactions || 0}</td>
-                                            <td className="p-3 text-right">
+                                            <td className="p-3 text-xs text-slate-400 text-center">{user.total_transactions || 0}</td>
+                                            <td className="p-3 text-center">
+                                                {user.is_banned ? <Lock size={14} className="mx-auto text-red-500"/> : <Unlock size={14} className="mx-auto text-emerald-500"/>}
+                                            </td>
+                                            <td className="p-3 text-right flex justify-end gap-2">
+                                                <button 
+                                                    onClick={() => toggleBanUser(user.id, user.is_banned, user.email)}
+                                                    className={`px-3 py-1 rounded text-xs font-bold transition flex items-center gap-2 border ${user.is_banned ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/50' : 'bg-red-600/20 text-red-400 border-red-500/50'}`}
+                                                >
+                                                    <Ban size={12}/> {user.is_banned ? 'Desbanear' : 'Banear'}
+                                                </button>
                                                 <button 
                                                     onClick={() => startImpersonation(user)}
-                                                    className="bg-sky-600/20 hover:bg-sky-600 text-sky-400 hover:text-white border border-sky-500/50 px-3 py-1 rounded text-xs font-bold transition flex items-center gap-2 ml-auto"
+                                                    className="bg-sky-600/20 hover:bg-sky-600 text-sky-400 hover:text-white border border-sky-500/50 px-3 py-1 rounded text-xs font-bold transition flex items-center gap-2"
                                                 >
                                                     <Eye size={12}/> Ver Como
                                                 </button>
