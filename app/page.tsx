@@ -10,7 +10,8 @@ import {
   Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, 
   Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
-  Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText 
+  Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
+  Users, UserCog, Power // ICONOS NUEVOS PARA ADMIN
 } from 'lucide-react';
 
 import { 
@@ -36,14 +37,19 @@ export default function Dashboard() {
 
   // ESTADOS DE UI GLOBAL
   const [privacyMode, setPrivacyMode] = useState(false);
-  const [searchQuery, setSearchQuery] = useState(''); // NUEVO: Buscador historial
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // ESTADOS DE IMPERSONACIÓN (GOD MODE) - NUEVO
+  const [impersonatedUser, setImpersonatedUser] = useState<{id: string, email: string} | null>(null);
+  const [usersList, setUsersList] = useState<any[]>([]); // Lista de usuarios para el admin
 
   // MODALES
   const [showForm, setShowForm] = useState(false);
   const [showSteamForm, setShowSteamForm] = useState(false);
   const [showCatManager, setShowCatManager] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [showPdfModal, setShowPdfModal] = useState(false); // NUEVO: Modal PDF
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [showUsersTable, setShowUsersTable] = useState(false); // NUEVO: Modal tabla usuarios
   
   const [editingLimit, setEditingLimit] = useState<{id: number, name: string, amount: number} | null>(null);
 
@@ -95,10 +101,14 @@ export default function Dashboard() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // --- FUNCIÓN DE CARGA INTELIGENTE (Soporta Impersonación) ---
   async function loadAllData(userId: string) {
-    await fetchCategories(userId);
-    fetchTransactions();
-    fetchSteamPortfolio();
+    // Si estamos impersonando, usamos el ID del usuario objetivo, si no, el de la sesión
+    const targetId = impersonatedUser ? impersonatedUser.id : userId;
+
+    await fetchCategories(targetId);
+    fetchTransactions(targetId);
+    fetchSteamPortfolio(targetId);
   }
 
   // --- DATOS FILTRADOS DEL MES ---
@@ -107,7 +117,6 @@ export default function Dashboard() {
     return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
   });
 
-  // --- DATOS FILTRADOS POR BÚSQUEDA (HISTORIAL) ---
   const displayedTransactions = currentMonthTransactions.filter(t => {
     const searchLower = searchQuery.toLowerCase();
     const matchName = t.name.toLowerCase().includes(searchLower);
@@ -115,7 +124,6 @@ export default function Dashboard() {
     return matchName || matchTag;
   });
 
-  // Cálculos globales (siempre sobre el total del mes, no sobre la búsqueda)
   const income = currentMonthTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
   const totalExpenses = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const steamNetValue = steamItems.reduce((acc, i) => acc + (i.quantity * i.current_price), 0) * 0.85;
@@ -123,117 +131,95 @@ export default function Dashboard() {
   const netWorth = currentBalance + steamNetValue;
 
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
-  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
+  
+  // Nombre a mostrar: Si impersonamos mostramos el email del usuario, si no el nuestro
+  const displayUserName = impersonatedUser 
+      ? `(Viendo a) ${impersonatedUser.email}` 
+      : (session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0]);
 
-  // --- FUNCIÓN EXPORTAR PDF (AVANZADA) ---
-  const generatePDF = () => {
-    // Filtrar datos según selección del modal
-    let dataToExport = currentMonthTransactions;
-    let subtitle = "Informe Completo";
-
-    if (pdfSelectedTags.length > 0) {
-        dataToExport = currentMonthTransactions.filter(t => {
-            if (!t.tags) return false;
-            // Si tiene CUALQUIERA de los tags seleccionados
-            return pdfSelectedTags.some(tag => t.tags.includes(tag));
-        });
-        subtitle = `Filtrado por: ${pdfSelectedTags.join(', ')}`;
-    }
-
-    // Recalcular totales para el PDF
-    const pdfIncome = dataToExport.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-    const pdfExpenses = dataToExport.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-
-    const doc = new jsPDF();
-    const title = `Informe: ${currentMonthName} ${currentYear}`;
-    const dateStr = new Date().toLocaleString();
-
-    // Cabecera
-    doc.setFontSize(18);
-    doc.text(title, 14, 20);
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(subtitle, 14, 26);
-    
-    doc.setTextColor(0);
-    doc.text(`Usuario: ${userName}`, 14, 34);
-    doc.text(`Generado: ${dateStr}`, 14, 39);
-
-    // Tabla Resumen (Específica del reporte generado)
-    autoTable(doc, {
-      startY: 45,
-      head: [['Resumen del Reporte', 'Valor']],
-      body: [
-        ['Ingresos (Selección)', formatEuro(pdfIncome)],
-        ['Gastos (Selección)', formatEuro(pdfExpenses)],
-        ['Balance (Selección)', formatEuro(pdfIncome - pdfExpenses)],
-      ],
-      theme: 'striped',
-      headStyles: { fillColor: [22, 27, 34] }
-    });
-
-    // Tabla Detalle
-    doc.text("Movimientos Detallados", 14, (doc as any).lastAutoTable.finalY + 10);
-
-    autoTable(doc, {
-      startY: (doc as any).lastAutoTable.finalY + 15,
-      head: [['Fecha', 'Concepto', 'Etiquetas', 'Importe']],
-      body: dataToExport.map(t => [
-        new Date(t.date).toLocaleDateString('es-ES'),
-        t.name,
-        t.tags || '-',
-        formatEuro(t.amount)
-      ]),
-      headStyles: { fillColor: [16, 185, 129] }
-    });
-
-    doc.save(`Informe_${currentMonthName}_${currentYear}.pdf`);
-    setShowPdfModal(false);
+  // --- FUNCIONES ADMIN NUEVAS ---
+  
+  const fetchUsersList = async () => {
+      // Llama a la función SQL que creamos
+      const { data, error } = await supabase.rpc('get_admin_users_list');
+      if (data) setUsersList(data);
+      if (error) alert("Error cargando usuarios: " + error.message);
   };
 
-  // --- LÓGICA DE TAGS PARA EL MODAL PDF ---
-  const getUniqueTags = () => {
-    const allTags = currentMonthTransactions
-        .map(t => t.tags)
-        .filter(t => t && t.trim() !== '') // Solo los que tienen tags
-        .join(' ') // Unir todo en un string gigante
-        .split(' ') // Separar por espacios
-        .filter(t => t.startsWith('#')); // Asegurar que son tags
-    
-    return Array.from(new Set(allTags)); // Eliminar duplicados
+  const startImpersonation = (targetUser: any) => {
+      if(!confirm(`¿Estás seguro de que quieres entrar como ${targetUser.email}?`)) return;
+      
+      setImpersonatedUser({ id: targetUser.id, email: targetUser.email });
+      setUsersList([]); // Limpiar lista
+      setShowUsersTable(false); // Cerrar modal usuarios
+      setShowAdminPanel(false); // Cerrar panel admin
+      
+      // Recargar datos con el ID del usuario objetivo
+      // NOTA: Pasamos el ID directamente para forzar la carga
+      fetchCategories(targetUser.id);
+      fetchTransactions(targetUser.id);
+      fetchSteamPortfolio(targetUser.id);
   };
 
-  // --- RESTO DE FUNCIONES ---
+  const stopImpersonation = () => {
+      setImpersonatedUser(null);
+      // Recargar datos con MI ID original
+      if (session) loadAllData(session.user.id);
+  };
+
+  // --- RESTO DE FUNCIONES (ADAPTADAS PARA RECIBIR ID OPCIONAL) ---
 
   async function fetchCategories(userId: string) {
-    const { data } = await supabase.from('user_categories').select('*').order('created_at', { ascending: true });
+    const { data } = await supabase.from('user_categories').select('*').eq('user_id', userId).order('created_at', { ascending: true });
     if (data) {
         setCategories(data);
         if (data.length > 0 && !newItem.category) setNewItem(prev => ({ ...prev, category: data[0].name }));
     }
   }
 
+  async function fetchTransactions(userId?: string) {
+    // Usamos el ID pasado O el ID de la sesión (para mantener compatibilidad)
+    const uid = userId || (impersonatedUser ? impersonatedUser.id : session?.user?.id);
+    if(!uid) return;
+
+    const { data } = await supabase.from('transactions').select('*').eq('user_id', uid).order('date', { ascending: false });
+    if (data) setAllTransactions(data);
+  }
+
+  async function fetchSteamPortfolio(userId?: string) {
+    const uid = userId || (impersonatedUser ? impersonatedUser.id : session?.user?.id);
+    if(!uid) return;
+
+    const { data } = await supabase.from('steam_portfolio').select('*').eq('user_id', uid);
+    if (data) setSteamItems(data);
+  }
+
+  // Las funciones de crear/borrar deben usar el ID correcto
   async function handleCreateCategory() {
-    if (!newCatForm.name || !session) return;
-    await supabase.from('user_categories').insert([{ user_id: session.user.id, name: newCatForm.name, color: newCatForm.color, is_income: newCatForm.is_income, budget_limit: parseFloat(newCatForm.budget_limit) || 0 }]);
+    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    if (!newCatForm.name || !uid) return;
+    await supabase.from('user_categories').insert([{ user_id: uid, name: newCatForm.name, color: newCatForm.color, is_income: newCatForm.is_income, budget_limit: parseFloat(newCatForm.budget_limit) || 0 }]);
     setNewCatForm({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
-    fetchCategories(session.user.id);
+    fetchCategories(uid);
   }
 
   async function handleDeleteCategory(id: number, name: string) {
+    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
     if(confirm(`¿Borrar "${name}"?`)) {
       await supabase.from('user_categories').delete().eq('id', id);
-      fetchCategories(session.user.id);
+      fetchCategories(uid);
     }
   }
 
   async function handleUpdateLimit() {
-    if (!editingLimit || !session) return;
+    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    if (!editingLimit || !uid) return;
     await supabase.from('user_categories').update({ budget_limit: editingLimit.amount }).eq('id', editingLimit.id);
     setEditingLimit(null);
-    fetchCategories(session.user.id);
+    fetchCategories(uid);
   }
 
+  // --- MANEJO DE PRECIOS STEAM ---
   const parseSteamPrice = (priceStr: string) => {
     let clean = priceStr.replace('€', '').replace('$', '').replace(',', '.').trim();
     clean = clean.replace('--', '00').replace('-', '00');
@@ -260,53 +246,118 @@ export default function Dashboard() {
         const p = data.lowest_price || data.median_price;
         if (p) await supabase.from('steam_portfolio').update({ current_price: parseSteamPrice(p) }).eq('id', item.id);
     }
-    fetchSteamPortfolio();
+    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    fetchSteamPortfolio(uid);
     setRefreshingSteam(false);
   }
 
-  async function fetchTransactions() {
-    const { data } = await supabase.from('transactions').select('*').order('date', { ascending: false });
-    if (data) setAllTransactions(data);
-  }
-
   async function handleAdd() {
-    if (!newItem.name || !newItem.amount || !session) return;
+    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    if (!newItem.name || !newItem.amount || !uid) return;
     const selectedCat = categories.find(c => c.name === newItem.category);
     const type = selectedCat?.is_income ? 'income' : 'expense';
     
-    // INCLUIR TAGS EN EL INSERT
     await supabase.from('transactions').insert([{ 
-        user_id: session.user.id, 
+        user_id: uid, 
         name: newItem.name, 
         amount: parseFloat(newItem.amount), 
         type, 
         category: newItem.category, 
         date: new Date(newItem.date).toISOString(),
-        tags: newItem.tags // Guardamos etiquetas
+        tags: newItem.tags 
     }]);
     
     setNewItem({ ...newItem, name: '', amount: '', tags: '' }); 
     setShowForm(false); 
-    fetchTransactions();
+    fetchTransactions(uid);
   }
 
   async function handleDelete(id: number) {
-    if(confirm("¿Borrar?")) { await supabase.from('transactions').delete().eq('id', id); fetchTransactions(); }
-  }
-
-  async function fetchSteamPortfolio() {
-    const { data } = await supabase.from('steam_portfolio').select('*');
-    if (data) setSteamItems(data);
+    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    if(confirm("¿Borrar?")) { await supabase.from('transactions').delete().eq('id', id); fetchTransactions(uid); }
   }
 
   async function handleAddSteam() {
-    await supabase.from('steam_portfolio').insert([{ user_id: session.user.id, item_name: newSteamItem.name, quantity: parseInt(newSteamItem.quantity), current_price: parseFloat(newSteamItem.price) }]);
-    setShowSteamForm(false); fetchSteamPortfolio();
+    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    if(!uid) return;
+    await supabase.from('steam_portfolio').insert([{ user_id: uid, item_name: newSteamItem.name, quantity: parseInt(newSteamItem.quantity), current_price: parseFloat(newSteamItem.price) }]);
+    setShowSteamForm(false); fetchSteamPortfolio(uid);
   }
 
   async function handleDeleteSteam(id: number) {
-    if(confirm("¿Borrar caja?")) { await supabase.from('steam_portfolio').delete().eq('id', id); fetchSteamPortfolio(); }
+    const uid = impersonatedUser ? impersonatedUser.id : session?.user?.id;
+    if(confirm("¿Borrar caja?")) { await supabase.from('steam_portfolio').delete().eq('id', id); fetchSteamPortfolio(uid); }
   }
+
+  // --- PDF ---
+  const generatePDF = () => {
+    let dataToExport = currentMonthTransactions;
+    let subtitle = "Informe Completo";
+
+    if (pdfSelectedTags.length > 0) {
+        dataToExport = currentMonthTransactions.filter(t => {
+            if (!t.tags) return false;
+            return pdfSelectedTags.some(tag => t.tags.includes(tag));
+        });
+        subtitle = `Filtrado por: ${pdfSelectedTags.join(', ')}`;
+    }
+
+    const pdfIncome = dataToExport.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+    const pdfExpenses = dataToExport.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+
+    const doc = new jsPDF();
+    const title = `Informe: ${currentMonthName} ${currentYear}`;
+    const dateStr = new Date().toLocaleString();
+
+    doc.setFontSize(18);
+    doc.text(title, 14, 20);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(subtitle, 14, 26);
+    
+    doc.setTextColor(0);
+    doc.text(`Usuario: ${displayUserName}`, 14, 34); // Usamos el nombre a mostrar
+    doc.text(`Generado: ${dateStr}`, 14, 39);
+
+    autoTable(doc, {
+      startY: 45,
+      head: [['Resumen del Reporte', 'Valor']],
+      body: [
+        ['Ingresos (Selección)', formatEuro(pdfIncome)],
+        ['Gastos (Selección)', formatEuro(pdfExpenses)],
+        ['Balance (Selección)', formatEuro(pdfIncome - pdfExpenses)],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [22, 27, 34] }
+    });
+
+    doc.text("Movimientos Detallados", 14, (doc as any).lastAutoTable.finalY + 10);
+
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 15,
+      head: [['Fecha', 'Concepto', 'Etiquetas', 'Importe']],
+      body: dataToExport.map(t => [
+        new Date(t.date).toLocaleDateString('es-ES'),
+        t.name,
+        t.tags || '-',
+        formatEuro(t.amount)
+      ]),
+      headStyles: { fillColor: [16, 185, 129] }
+    });
+
+    doc.save(`Informe_${currentMonthName}_${currentYear}.pdf`);
+    setShowPdfModal(false);
+  };
+
+  const getUniqueTags = () => {
+    const allTags = currentMonthTransactions
+        .map(t => t.tags)
+        .filter(t => t && t.trim() !== '') 
+        .join(' ')
+        .split(' ')
+        .filter(t => t.startsWith('#')); 
+    return Array.from(new Set(allTags));
+  };
 
   async function fetchSystemAlert() {
     const { data } = await supabase.from('system_config').select('*').eq('key_name', 'global_alert').single();
@@ -360,7 +411,6 @@ export default function Dashboard() {
     setLoading(false);
   }
 
-  // --- VARIABLES DE UI ---
   const lastMonthDate = new Date(currentYear, currentMonthIndex - 1, 1);
   const lastMonthExpenses = allTransactions.filter(t => {
       const d = new Date(t.date);
@@ -389,7 +439,16 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen font-sans text-white flex flex-col bg-[#0d1117]">
+      {/* BANNER DE AVISO GLOBAL */}
       {systemAlert.active && <div className="bg-amber-500/10 border-b border-amber-500/20 py-2 text-center text-amber-400 text-sm font-bold"><Megaphone className="inline mr-2" size={16}/>{systemAlert.message}</div>}
+      
+      {/* BANNER DE IMPERSONACIÓN (SOLO SI ESTÁ ACTIVO) */}
+      {impersonatedUser && (
+         <div className="bg-orange-600/20 border-b border-orange-500 py-2 px-4 flex justify-between items-center text-orange-400 animate-pulse">
+            <span className="font-bold flex items-center gap-2"><Eye size={18}/> VIENDO COMO: {impersonatedUser.email}</span>
+            <button onClick={stopImpersonation} className="bg-orange-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-orange-500 transition flex items-center gap-1"><LogOut size={12}/> SALIR DEL MODO</button>
+         </div>
+      )}
 
       <div className="flex-1 p-4 md:p-6 relative">
           <button onClick={() => setShowForm(true)} className="fixed bottom-8 right-8 z-50 bg-emerald-500 text-black font-bold p-4 rounded-full shadow-2xl hover:scale-110 transition-all"><Plus size={24} /></button>
@@ -423,13 +482,12 @@ export default function Dashboard() {
              </div>
           )}
 
-          {/* MODAL PDF CONFIG (NUEVO) */}
+          {/* MODAL PDF CONFIG */}
           {showPdfModal && (
             <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4">
               <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-sm border border-slate-700">
                 <div className="flex justify-between mb-4"><h3 className="font-bold flex items-center gap-2"><FileText size={20}/> Generar Informe</h3><button onClick={() => setShowPdfModal(false)}><X/></button></div>
                 <p className="text-sm text-slate-400 mb-4">Selecciona qué gastos quieres incluir:</p>
-                
                 <div className="bg-[#0d1117] p-3 rounded border border-slate-800 mb-4 max-h-40 overflow-y-auto custom-scrollbar">
                     <label className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded cursor-pointer">
                         <input type="checkbox" checked={pdfSelectedTags.length === 0} onChange={() => setPdfSelectedTags([])}/>
@@ -438,20 +496,12 @@ export default function Dashboard() {
                     <div className="h-px bg-slate-700 my-1"></div>
                     {getUniqueTags().map(tag => (
                         <label key={tag} className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded cursor-pointer">
-                            <input 
-                                type="checkbox" 
-                                checked={pdfSelectedTags.includes(tag)} 
-                                onChange={(e) => {
-                                    if(e.target.checked) setPdfSelectedTags([...pdfSelectedTags, tag]);
-                                    else setPdfSelectedTags(pdfSelectedTags.filter(t => t !== tag));
-                                }}
-                            />
+                            <input type="checkbox" checked={pdfSelectedTags.includes(tag)} onChange={(e) => {if(e.target.checked) setPdfSelectedTags([...pdfSelectedTags, tag]); else setPdfSelectedTags(pdfSelectedTags.filter(t => t !== tag));}}/>
                             <span className="text-sm text-sky-400">{tag}</span>
                         </label>
                     ))}
                     {getUniqueTags().length === 0 && <p className="text-xs text-slate-500 italic p-2">No hay etiquetas este mes.</p>}
                 </div>
-
                 <button onClick={generatePDF} className="w-full bg-emerald-600 font-bold py-3 rounded-lg hover:bg-emerald-500 transition">Generar PDF</button>
               </div>
             </div>
@@ -463,6 +513,13 @@ export default function Dashboard() {
                <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-2xl border border-red-500/30 flex flex-col max-h-[90vh]">
                   <div className="flex justify-between mb-6 border-b border-slate-700 pb-4"><h3 className="font-bold text-xl text-red-400 flex items-center gap-2"><Shield size={24}/> Admin Panel</h3><button onClick={() => setShowAdminPanel(false)}><X/></button></div>
                   <div className="overflow-y-auto space-y-6">
+                      
+                      {/* BOTÓN GESTIÓN USUARIOS (NUEVO) */}
+                      <button onClick={() => { fetchUsersList(); setShowUsersTable(true); }} className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center hover:bg-slate-700 transition group">
+                          <div className="flex items-center gap-3"><div className="bg-sky-500/20 p-2 rounded-lg"><Users className="text-sky-400"/></div><div className="text-left"><p className="font-bold text-white">Gestionar Usuarios</p><p className="text-xs text-slate-400">Ver listado y acceder como usuario</p></div></div>
+                          <ChevronRight className="text-slate-500 group-hover:text-white"/>
+                      </button>
+
                       <div className="space-y-4"><h4 className="text-white font-bold flex items-center gap-2"><Megaphone size={18} className="text-amber-400"/> Aviso Global</h4><textarea className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 h-20 text-sm" value={adminMessageInput} onChange={(e) => setAdminMessageInput(e.target.value)}/><div className="flex gap-2"><button onClick={() => handleSaveAlert(true)} className="flex-1 bg-emerald-600/20 text-emerald-400 border border-emerald-600/50 py-2 rounded font-bold">Publicar</button><button onClick={() => handleSaveAlert(false)} className="flex-1 bg-slate-700/20 text-slate-400 border border-slate-600/50 py-2 rounded font-bold">Ocultar</button></div></div>
                       <div className="space-y-4 pt-4 border-t border-slate-700">
                           <div className="flex justify-between items-center"><h4 className="text-white font-bold flex items-center gap-2"><Activity size={18} className="text-sky-400"/> Consola</h4><button onClick={runDiagnostics} className="bg-sky-600 px-3 py-1 rounded text-xs font-bold">Test</button></div>
@@ -482,7 +539,52 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* MODAL TRANSACCION (NUEVO CAMPO TAGS) */}
+          {/* MODAL LISTA DE USUARIOS (NUEVO) */}
+          {showUsersTable && (
+            <div className="fixed inset-0 bg-black/90 z-[80] flex items-center justify-center p-4">
+                <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-4xl border border-slate-700 h-[80vh] flex flex-col">
+                    <div className="flex justify-between mb-4 border-b border-slate-700 pb-2">
+                        <h3 className="font-bold text-xl flex items-center gap-2 text-white"><Users className="text-sky-400"/> Usuarios Registrados</h3>
+                        <button onClick={() => setShowUsersTable(false)}><X className="text-slate-400 hover:text-white"/></button>
+                    </div>
+                    <div className="flex-1 overflow-auto custom-scrollbar">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="text-slate-500 text-xs uppercase border-b border-slate-700">
+                                    <th className="p-3">Email</th>
+                                    <th className="p-3">Último Acceso</th>
+                                    <th className="p-3">Transacciones</th>
+                                    <th className="p-3 text-right">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {usersList.length === 0 ? (
+                                    <tr><td colSpan={4} className="p-4 text-center text-slate-500 italic">No se encontraron usuarios o error de permisos.</td></tr>
+                                ) : (
+                                    usersList.map((user: any) => (
+                                        <tr key={user.id} className="border-b border-slate-800 hover:bg-slate-800/50 transition">
+                                            <td className="p-3 text-sm font-bold text-white">{user.email}</td>
+                                            <td className="p-3 text-xs text-slate-400">{new Date(user.last_sign_in_at).toLocaleDateString()}</td>
+                                            <td className="p-3 text-xs text-slate-400">{user.total_transactions || 0}</td>
+                                            <td className="p-3 text-right">
+                                                <button 
+                                                    onClick={() => startImpersonation(user)}
+                                                    className="bg-sky-600/20 hover:bg-sky-600 text-sky-400 hover:text-white border border-sky-500/50 px-3 py-1 rounded text-xs font-bold transition flex items-center gap-2 ml-auto"
+                                                >
+                                                    <Eye size={12}/> Ver Como
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+          )}
+
+          {/* MODAL TRANSACCION */}
           {showForm && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
               <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700 space-y-4">
@@ -490,10 +592,7 @@ export default function Dashboard() {
                 <input type="date" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" value={newItem.date} onChange={e => setNewItem({...newItem, date: e.target.value})} />
                 <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Concepto" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}/>
                 <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Importe" value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}/>
-                
-                {/* CAMPO DE ETIQUETAS NUEVO */}
                 <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-sm" placeholder="Etiquetas (ej: #vacaciones #fiesta)" value={newItem.tags} onChange={e => setNewItem({...newItem, tags: e.target.value})}/>
-                
                 <div className="grid grid-cols-2 gap-2">
                      <div className="bg-[#0f172a] border border-slate-600 rounded p-3 text-slate-400 text-center text-sm flex items-center justify-center">
                         {categories.find(c => c.name === newItem.category)?.is_income ? 'Ingreso (+)' : 'Gasto (-)'}
@@ -510,7 +609,7 @@ export default function Dashboard() {
             <div className="md:col-span-12 bg-[#161b22] p-4 rounded-xl border border-slate-800 flex justify-between items-center">
                 <div className="flex items-center gap-4">
                     <div className="bg-slate-800 p-3 rounded-full"><User className={isAdmin ? "text-red-500" : "text-emerald-400"} size={24} /></div>
-                    <div><p className="text-slate-400 text-xs">Bienvenido</p><h2 className="text-lg font-bold">{userName}</h2></div>
+                    <div><p className="text-slate-400 text-xs">Bienvenido</p><h2 className="text-lg font-bold">{displayUserName}</h2></div>
                     <button onClick={() => setShowCatManager(true)} className="bg-slate-800 p-2 rounded-lg text-slate-300 border border-slate-700 flex gap-2 text-xs"><Tag size={14}/> Categorías</button>
                     <button onClick={() => setPrivacyMode(!privacyMode)} className="bg-slate-800 p-2 rounded-lg border border-slate-700 text-slate-300">{privacyMode ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
                 </div>
@@ -573,17 +672,11 @@ export default function Dashboard() {
             </div>
 
             <div className="md:col-span-4 bg-[#161b22] rounded-xl border border-slate-800 p-4 flex flex-col h-[400px]">
-                {/* CABECERA HISTORIAL CON BUSCADOR */}
                 <div className="flex justify-between items-center mb-4 gap-2">
                     <h3 className="font-bold flex gap-2 whitespace-nowrap"><Calendar className="text-slate-400"/> Historial</h3>
                     <div className="flex items-center bg-[#0d1117] border border-slate-700 rounded px-2 py-1 flex-1 mx-2">
                         <Search size={12} className="text-slate-500 mr-2"/>
-                        <input 
-                            className="bg-transparent text-xs text-white outline-none w-full placeholder:text-slate-600" 
-                            placeholder="Buscar (ej: #fiesta)"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                        />
+                        <input className="bg-transparent text-xs text-white outline-none w-full placeholder:text-slate-600" placeholder="Buscar (ej: #fiesta)" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
                     </div>
                     <button onClick={() => setShowPdfModal(true)} className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 font-bold hover:bg-emerald-500 hover:text-black transition flex items-center gap-1"><FileText size={12}/> PDF</button>
                 </div>
@@ -595,10 +688,7 @@ export default function Dashboard() {
                         displayedTransactions.map(t => (
                             <div key={t.id} className="flex justify-between items-center p-2 rounded bg-[#0d1117] border border-slate-800 group text-xs">
                                 <div>
-                                    <p className="font-medium flex items-center gap-2">
-                                        {t.name}
-                                        {t.tags && <span className="text-[9px] text-sky-400 bg-sky-900/20 px-1 rounded">{t.tags}</span>}
-                                    </p>
+                                    <p className="font-medium flex items-center gap-2">{t.name}{t.tags && <span className="text-[9px] text-sky-400 bg-sky-900/20 px-1 rounded">{t.tags}</span>}</p>
                                     <p className="text-[9px] text-slate-500">{t.category}</p>
                                 </div>
                                 <div className="flex gap-2"><span className={`${t.type==='income'?'text-emerald-400':'text-rose-500'} ${blurClass}`}>{formatEuro(t.type === 'income' ? t.amount : -t.amount)}</span><button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button></div>
