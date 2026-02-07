@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react'; // AÑADIDO useRef
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from './supabase';
 // IMPORTS PARA PDF
 import jsPDF from 'jspdf';
@@ -11,7 +11,7 @@ import {
   Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, Ban, Lock, Unlock // ICONOS NUEVOS
+  Users, Ban, Lock, Unlock 
 } from 'lucide-react';
 
 import { 
@@ -41,7 +41,6 @@ export default function Dashboard() {
 
   // ESTADOS DE IMPERSONACIÓN (GOD MODE)
   const [impersonatedUser, setImpersonatedUser] = useState<{id: string, email: string} | null>(null);
-  // REF PARA EL BUG DE LA PESTAÑA (Mantiene el valor aunque el componente se renderice)
   const impersonatingRef = useRef<{id: string, email: string} | null>(null);
 
   const [usersList, setUsersList] = useState<any[]>([]); 
@@ -91,28 +90,16 @@ export default function Dashboard() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if(session) {
-          // Chequear si el usuario está baneado al cargar
-          if(session.user.user_metadata?.banned) {
-              alert("Tu cuenta ha sido suspendida.");
-              supabase.auth.signOut();
-              return;
-          }
           loadAllData(session.user.id);
       }
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      // FIX CRÍTICO: Si estamos impersonando, NO recargar datos de sesión original
-      if (impersonatingRef.current) return;
+      if (impersonatingRef.current) return; // Si estamos espiando, ignorar cambios de sesión propios
 
       setSession(session);
       if(session) {
-           if(session.user.user_metadata?.banned) {
-              alert("Tu cuenta ha sido suspendida.");
-              supabase.auth.signOut();
-              return;
-          }
           loadAllData(session.user.id);
       } else { 
           setAllTransactions([]); setSteamItems([]); setCategories([]); 
@@ -123,8 +110,31 @@ export default function Dashboard() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // --- REAL-TIME BAN CHECKER (EL VIGILANTE) ---
+  // Comprueba cada 4 segundos si el usuario ha sido baneado en la DB
+  useEffect(() => {
+    if (!session) return;
+
+    const checkBanInterval = setInterval(async () => {
+        // IMPORTANTE: Si estamos impersonando a otro, NO comprobar baneo
+        // (porque estaríamos comprobando si YO, el admin, estoy baneado, o daría conflicto)
+        if (impersonatingRef.current) return;
+
+        const { data: isBanned, error } = await supabase.rpc('am_i_banned');
+        
+        if (!error && isBanned === true) {
+            clearInterval(checkBanInterval);
+            alert("🚫 TU CUENTA HA SIDO SUSPENDIDA POR EL ADMINISTRADOR.\n\nSe cerrará la sesión inmediatamente.");
+            await supabase.auth.signOut();
+            window.location.reload(); // Recargar para limpiar todo
+        }
+    }, 4000); // Comprobar cada 4 segundos
+
+    return () => clearInterval(checkBanInterval);
+  }, [session]);
+
+
   async function loadAllData(userId: string) {
-    // Si la referencia tiene valor, usamos ESE id, no el de la sesión
     const targetId = impersonatingRef.current ? impersonatingRef.current.id : userId;
 
     await fetchCategories(targetId);
@@ -171,13 +181,12 @@ export default function Dashboard() {
       const target = { id: targetUser.id, email: targetUser.email };
       
       setImpersonatedUser(target);
-      impersonatingRef.current = target; // ACTUALIZAR REFERENCIA
+      impersonatingRef.current = target;
 
       setUsersList([]); 
       setShowUsersTable(false); 
       setShowAdminPanel(false); 
       
-      // Cargar datos del objetivo
       fetchCategories(targetUser.id);
       fetchTransactions(targetUser.id);
       fetchSteamPortfolio(targetUser.id);
@@ -185,7 +194,7 @@ export default function Dashboard() {
 
   const stopImpersonation = () => {
       setImpersonatedUser(null);
-      impersonatingRef.current = null; // LIMPIAR REFERENCIA
+      impersonatingRef.current = null;
       if (session) loadAllData(session.user.id);
   };
 
@@ -194,13 +203,13 @@ export default function Dashboard() {
       
       const { error } = await supabase.rpc('toggle_ban_user', { target_user_id: userId });
       if(!error) {
-          fetchUsersList(); // Recargar lista
+          fetchUsersList(); 
       } else {
           alert("Error al banear: " + error.message);
       }
   };
 
-  // --- RESTO DE FUNCIONES (USANDO REF PARA ID) ---
+  // --- RESTO DE FUNCIONES ---
 
   async function fetchCategories(userId: string) {
     const { data } = await supabase.from('user_categories').select('*').eq('user_id', userId).order('created_at', { ascending: true });
@@ -433,8 +442,9 @@ export default function Dashboard() {
       if (error) {
            alert(error.message);
       } else {
-          // Chequeo extra por si acaba de loguearse alguien baneado
-          if(data.session?.user.user_metadata?.banned) {
+          // Chequeo inicial al login por si acaso
+          const { data: banned } = await supabase.rpc('am_i_banned');
+          if(banned) {
               await supabase.auth.signOut();
               alert("Esta cuenta está baneada por el administrador.");
           }
