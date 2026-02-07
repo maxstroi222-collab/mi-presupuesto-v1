@@ -11,7 +11,7 @@ import {
   Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, Ban, Lock, Unlock 
+  Users, Ban, Lock, Unlock, Pencil // AÑADIDO Pencil
 } from 'lucide-react';
 
 import { 
@@ -45,8 +45,10 @@ export default function Dashboard() {
 
   const [usersList, setUsersList] = useState<any[]>([]); 
 
-  // MODALES
+  // MODALES Y EDICIÓN
   const [showForm, setShowForm] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<any>(null); // NUEVO: Estado para saber qué editamos
+
   const [showSteamForm, setShowSteamForm] = useState(false);
   const [showCatManager, setShowCatManager] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -96,7 +98,7 @@ export default function Dashboard() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (impersonatingRef.current) return; // Si estamos espiando, ignorar cambios de sesión propios
+      if (impersonatingRef.current) return; 
 
       setSession(session);
       if(session) {
@@ -110,14 +112,11 @@ export default function Dashboard() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // --- REAL-TIME BAN CHECKER (EL VIGILANTE) ---
-  // Comprueba cada 4 segundos si el usuario ha sido baneado en la DB
+  // --- REAL-TIME BAN CHECKER ---
   useEffect(() => {
     if (!session) return;
 
     const checkBanInterval = setInterval(async () => {
-        // IMPORTANTE: Si estamos impersonando a otro, NO comprobar baneo
-        // (porque estaríamos comprobando si YO, el admin, estoy baneado, o daría conflicto)
         if (impersonatingRef.current) return;
 
         const { data: isBanned, error } = await supabase.rpc('am_i_banned');
@@ -126,9 +125,9 @@ export default function Dashboard() {
             clearInterval(checkBanInterval);
             alert("🚫 TU CUENTA HA SIDO SUSPENDIDA POR EL ADMINISTRADOR.\n\nSe cerrará la sesión inmediatamente.");
             await supabase.auth.signOut();
-            window.location.reload(); // Recargar para limpiar todo
+            window.location.reload(); 
         }
-    }, 4000); // Comprobar cada 4 segundos
+    }, 4000); 
 
     return () => clearInterval(checkBanInterval);
   }, [session]);
@@ -288,23 +287,53 @@ export default function Dashboard() {
     setRefreshingSteam(false);
   }
 
-  async function handleAdd() {
+  // --- ABRIR MODAL PARA EDITAR ---
+  const handleEditTransaction = (t: any) => {
+      setEditingTransaction(t);
+      setNewItem({
+          name: t.name,
+          amount: t.amount,
+          type: t.type,
+          category: t.category,
+          date: new Date(t.date).toISOString().split('T')[0],
+          tags: t.tags || ''
+      });
+      setShowForm(true);
+  };
+
+  // --- GUARDAR TRANSACCIÓN (CREAR O ACTUALIZAR) ---
+  async function handleSaveTransaction() {
     const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
     if (!newItem.name || !newItem.amount || !uid) return;
     const selectedCat = categories.find(c => c.name === newItem.category);
     const type = selectedCat?.is_income ? 'income' : 'expense';
     
-    await supabase.from('transactions').insert([{ 
-        user_id: uid, 
-        name: newItem.name, 
-        amount: parseFloat(newItem.amount), 
-        type, 
-        category: newItem.category, 
-        date: new Date(newItem.date).toISOString(),
-        tags: newItem.tags 
-    }]);
+    if (editingTransaction) {
+        // ACTUALIZAR EXISTENTE
+        await supabase.from('transactions').update({
+            name: newItem.name,
+            amount: parseFloat(newItem.amount),
+            type,
+            category: newItem.category,
+            date: new Date(newItem.date).toISOString(),
+            tags: newItem.tags
+        }).eq('id', editingTransaction.id);
+    } else {
+        // CREAR NUEVO
+        await supabase.from('transactions').insert([{ 
+            user_id: uid, 
+            name: newItem.name, 
+            amount: parseFloat(newItem.amount), 
+            type, 
+            category: newItem.category, 
+            date: new Date(newItem.date).toISOString(),
+            tags: newItem.tags 
+        }]);
+    }
     
+    // Resetear formulario
     setNewItem({ ...newItem, name: '', amount: '', tags: '' }); 
+    setEditingTransaction(null);
     setShowForm(false); 
     fetchTransactions(uid);
   }
@@ -442,7 +471,6 @@ export default function Dashboard() {
       if (error) {
            alert(error.message);
       } else {
-          // Chequeo inicial al login por si acaso
           const { data: banned } = await supabase.rpc('am_i_banned');
           if(banned) {
               await supabase.auth.signOut();
@@ -486,7 +514,6 @@ export default function Dashboard() {
     <div className="min-h-screen font-sans text-white flex flex-col bg-[#0d1117]">
       {systemAlert.active && <div className="bg-amber-500/10 border-b border-amber-500/20 py-2 text-center text-amber-400 text-sm font-bold"><Megaphone className="inline mr-2" size={16}/>{systemAlert.message}</div>}
       
-      {/* BANNER DE IMPERSONACIÓN */}
       {impersonatedUser && (
          <div className="bg-orange-600/20 border-b border-orange-500 py-2 px-4 flex justify-between items-center text-orange-400 animate-pulse sticky top-0 z-[100]">
             <span className="font-bold flex items-center gap-2"><Eye size={18}/> VIENDO COMO: {impersonatedUser.email}</span>
@@ -495,7 +522,7 @@ export default function Dashboard() {
       )}
 
       <div className="flex-1 p-4 md:p-6 relative">
-          <button onClick={() => setShowForm(true)} className="fixed bottom-8 right-8 z-50 bg-emerald-500 text-black font-bold p-4 rounded-full shadow-2xl hover:scale-110 transition-all"><Plus size={24} /></button>
+          <button onClick={() => { setShowForm(true); setEditingTransaction(null); setNewItem({name: '', amount: '', type: 'expense', category: categories[0]?.name || '', date: new Date().toISOString().split('T')[0], tags: ''}); }} className="fixed bottom-8 right-8 z-50 bg-emerald-500 text-black font-bold p-4 rounded-full shadow-2xl hover:scale-110 transition-all"><Plus size={24} /></button>
           <div className="fixed bottom-8 left-8 z-50 flex gap-3"><button onClick={() => supabase.auth.signOut()} className="bg-[#1e293b] font-bold py-3 px-6 rounded-full border border-slate-600 flex gap-2"><LogOut size={18}/> Salir</button>{isAdmin && <button onClick={() => setShowAdminPanel(true)} className="bg-red-900/80 p-3 rounded-full border border-red-500/50"><Shield size={20}/></button>}</div>
 
           {/* GESTOR CATEGORÍAS */}
@@ -640,11 +667,14 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* MODAL TRANSACCION */}
+          {/* MODAL TRANSACCION (EDITAR / CREAR) */}
           {showForm && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
               <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700 space-y-4">
-                <div className="flex justify-between"><h3 className="font-bold">Añadir Movimiento</h3><button onClick={() => setShowForm(false)}><X/></button></div>
+                <div className="flex justify-between">
+                    <h3 className="font-bold">{editingTransaction ? 'Editar Movimiento' : 'Añadir Movimiento'}</h3>
+                    <button onClick={() => { setShowForm(false); setEditingTransaction(null); }}><X/></button>
+                </div>
                 <input type="date" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" value={newItem.date} onChange={e => setNewItem({...newItem, date: e.target.value})} />
                 <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Concepto" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}/>
                 <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Importe" value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}/>
@@ -655,7 +685,7 @@ export default function Dashboard() {
                      </div>
                     <select className="bg-[#0f172a] border border-slate-600 rounded p-3 text-white" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
                 </div>
-                <button onClick={handleAdd} className="w-full bg-emerald-500 text-black font-bold py-3 rounded-lg">Guardar</button>
+                <button onClick={handleSaveTransaction} className="w-full bg-emerald-500 text-black font-bold py-3 rounded-lg">{editingTransaction ? 'Actualizar' : 'Guardar'}</button>
               </div>
             </div>
           )}
@@ -747,7 +777,15 @@ export default function Dashboard() {
                                     <p className="font-medium flex items-center gap-2">{t.name}{t.tags && <span className="text-[9px] text-sky-400 bg-sky-900/20 px-1 rounded">{t.tags}</span>}</p>
                                     <p className="text-[9px] text-slate-500">{t.category}</p>
                                 </div>
-                                <div className="flex gap-2"><span className={`${t.type==='income'?'text-emerald-400':'text-rose-500'} ${blurClass}`}>{formatEuro(t.type === 'income' ? t.amount : -t.amount)}</span><button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button></div>
+                                <div className="flex gap-2">
+                                    <span className={`${t.type==='income'?'text-emerald-400':'text-rose-500'} ${blurClass}`}>{formatEuro(t.type === 'income' ? t.amount : -t.amount)}</span>
+                                    
+                                    {/* BOTONES DE EDICIÓN Y BORRADO */}
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={() => handleEditTransaction(t)} className="text-slate-500 hover:text-white"><Pencil size={12}/></button>
+                                        <button onClick={() => handleDelete(t.id)} className="text-slate-500 hover:text-rose-500"><Trash2 size={12}/></button>
+                                    </div>
+                                </div>
                             </div>
                         ))
                     )}
