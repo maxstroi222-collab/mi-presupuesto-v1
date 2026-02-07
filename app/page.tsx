@@ -10,7 +10,7 @@ import {
   Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, 
   Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
-  Activity, CheckCircle, XCircle, Play, Terminal 
+  Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText 
 } from 'lucide-react';
 
 import { 
@@ -36,26 +36,34 @@ export default function Dashboard() {
 
   // ESTADOS DE UI GLOBAL
   const [privacyMode, setPrivacyMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(''); // NUEVO: Buscador historial
 
   // MODALES
   const [showForm, setShowForm] = useState(false);
   const [showSteamForm, setShowSteamForm] = useState(false);
   const [showCatManager, setShowCatManager] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showPdfModal, setShowPdfModal] = useState(false); // NUEVO: Modal PDF
   
   const [editingLimit, setEditingLimit] = useState<{id: number, name: string, amount: number} | null>(null);
 
+  // Estados Admin y Config
   const [systemAlert, setSystemAlert] = useState({ message: '', active: false });
   const [adminMessageInput, setAdminMessageInput] = useState('');
   const [newSteamItem, setNewSteamItem] = useState({ name: '', quantity: '', price: '' });
   const [fetchingPrice, setFetchingPrice] = useState(false);
   const [refreshingSteam, setRefreshingSteam] = useState(false);
 
+  // Diagnóstico
   const [diagnosticLogs, setDiagnosticLogs] = useState<{msg: string, status: 'info'|'success'|'error'}[]>([]);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
 
-  const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0] });
+  // Formularios
+  const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0], tags: '' });
   const [newCatForm, setNewCatForm] = useState({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
+
+  // PDF Config
+  const [pdfSelectedTags, setPdfSelectedTags] = useState<string[]>([]);
 
   // --- MÁQUINA DEL TIEMPO ---
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -93,12 +101,21 @@ export default function Dashboard() {
     fetchSteamPortfolio();
   }
 
-  // --- CÁLCULOS GENERALES PARA USAR EN EL PDF ---
+  // --- DATOS FILTRADOS DEL MES ---
   const currentMonthTransactions = allTransactions.filter(t => {
     const d = new Date(t.date);
     return d.getMonth() === currentMonthIndex && d.getFullYear() === currentYear;
   });
 
+  // --- DATOS FILTRADOS POR BÚSQUEDA (HISTORIAL) ---
+  const displayedTransactions = currentMonthTransactions.filter(t => {
+    const searchLower = searchQuery.toLowerCase();
+    const matchName = t.name.toLowerCase().includes(searchLower);
+    const matchTag = t.tags ? t.tags.toLowerCase().includes(searchLower) : false;
+    return matchName || matchTag;
+  });
+
+  // Cálculos globales (siempre sobre el total del mes, no sobre la búsqueda)
   const income = currentMonthTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
   const totalExpenses = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
   const steamNetValue = steamItems.reduce((acc, i) => acc + (i.quantity * i.current_price), 0) * 0.85;
@@ -108,52 +125,82 @@ export default function Dashboard() {
   const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount);
   const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
 
-  // --- FUNCIÓN EXPORTAR PDF ---
-  const exportMonthlyPDF = () => {
+  // --- FUNCIÓN EXPORTAR PDF (AVANZADA) ---
+  const generatePDF = () => {
+    // Filtrar datos según selección del modal
+    let dataToExport = currentMonthTransactions;
+    let subtitle = "Informe Completo";
+
+    if (pdfSelectedTags.length > 0) {
+        dataToExport = currentMonthTransactions.filter(t => {
+            if (!t.tags) return false;
+            // Si tiene CUALQUIERA de los tags seleccionados
+            return pdfSelectedTags.some(tag => t.tags.includes(tag));
+        });
+        subtitle = `Filtrado por: ${pdfSelectedTags.join(', ')}`;
+    }
+
+    // Recalcular totales para el PDF
+    const pdfIncome = dataToExport.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+    const pdfExpenses = dataToExport.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+
     const doc = new jsPDF();
-    const title = `Informe Financiero: ${currentMonthName} ${currentYear}`;
+    const title = `Informe: ${currentMonthName} ${currentYear}`;
     const dateStr = new Date().toLocaleString();
 
     // Cabecera
     doc.setFontSize(18);
     doc.text(title, 14, 20);
-    
     doc.setFontSize(10);
-    doc.text(`Usuario: ${userName}`, 14, 28);
-    doc.text(`Generado: ${dateStr}`, 14, 33);
-    doc.text(`Patrimonio Total: ${formatEuro(netWorth)}`, 14, 38);
+    doc.setTextColor(100);
+    doc.text(subtitle, 14, 26);
+    
+    doc.setTextColor(0);
+    doc.text(`Usuario: ${userName}`, 14, 34);
+    doc.text(`Generado: ${dateStr}`, 14, 39);
 
-    // Tabla Resumen
+    // Tabla Resumen (Específica del reporte generado)
     autoTable(doc, {
       startY: 45,
-      head: [['Concepto', 'Valor']],
+      head: [['Resumen del Reporte', 'Valor']],
       body: [
-        ['Ingresos Mes', formatEuro(income)],
-        ['Gastos Mes', formatEuro(totalExpenses)],
-        ['Balance Neto', formatEuro(income - totalExpenses)],
-        ['Steam (Valor Neto)', formatEuro(steamNetValue)],
+        ['Ingresos (Selección)', formatEuro(pdfIncome)],
+        ['Gastos (Selección)', formatEuro(pdfExpenses)],
+        ['Balance (Selección)', formatEuro(pdfIncome - pdfExpenses)],
       ],
       theme: 'striped',
       headStyles: { fillColor: [22, 27, 34] }
     });
 
     // Tabla Detalle
-    doc.text("Detalle de Movimientos", 14, (doc as any).lastAutoTable.finalY + 10);
+    doc.text("Movimientos Detallados", 14, (doc as any).lastAutoTable.finalY + 10);
 
     autoTable(doc, {
       startY: (doc as any).lastAutoTable.finalY + 15,
-      head: [['Fecha', 'Concepto', 'Categoria', 'Tipo', 'Importe']],
-      body: currentMonthTransactions.map(t => [
+      head: [['Fecha', 'Concepto', 'Etiquetas', 'Importe']],
+      body: dataToExport.map(t => [
         new Date(t.date).toLocaleDateString('es-ES'),
         t.name,
-        t.category,
-        t.type === 'income' ? 'Ingreso' : 'Gasto',
+        t.tags || '-',
         formatEuro(t.amount)
       ]),
       headStyles: { fillColor: [16, 185, 129] }
     });
 
     doc.save(`Informe_${currentMonthName}_${currentYear}.pdf`);
+    setShowPdfModal(false);
+  };
+
+  // --- LÓGICA DE TAGS PARA EL MODAL PDF ---
+  const getUniqueTags = () => {
+    const allTags = currentMonthTransactions
+        .map(t => t.tags)
+        .filter(t => t && t.trim() !== '') // Solo los que tienen tags
+        .join(' ') // Unir todo en un string gigante
+        .split(' ') // Separar por espacios
+        .filter(t => t.startsWith('#')); // Asegurar que son tags
+    
+    return Array.from(new Set(allTags)); // Eliminar duplicados
   };
 
   // --- RESTO DE FUNCIONES ---
@@ -226,8 +273,21 @@ export default function Dashboard() {
     if (!newItem.name || !newItem.amount || !session) return;
     const selectedCat = categories.find(c => c.name === newItem.category);
     const type = selectedCat?.is_income ? 'income' : 'expense';
-    await supabase.from('transactions').insert([{ user_id: session.user.id, name: newItem.name, amount: parseFloat(newItem.amount), type, category: newItem.category, date: new Date(newItem.date).toISOString() }]);
-    setNewItem({ ...newItem, name: '', amount: '' }); setShowForm(false); fetchTransactions();
+    
+    // INCLUIR TAGS EN EL INSERT
+    await supabase.from('transactions').insert([{ 
+        user_id: session.user.id, 
+        name: newItem.name, 
+        amount: parseFloat(newItem.amount), 
+        type, 
+        category: newItem.category, 
+        date: new Date(newItem.date).toISOString(),
+        tags: newItem.tags // Guardamos etiquetas
+    }]);
+    
+    setNewItem({ ...newItem, name: '', amount: '', tags: '' }); 
+    setShowForm(false); 
+    fetchTransactions();
   }
 
   async function handleDelete(id: number) {
@@ -350,24 +410,51 @@ export default function Dashboard() {
                     </div>
                     <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700 space-y-3">
                         <div className="grid grid-cols-2 gap-2"><input className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Nombre" value={newCatForm.name} onChange={e => setNewCatForm({...newCatForm, name: e.target.value})}/><input type="number" className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Importe" value={newCatForm.budget_limit} onChange={e => setNewCatForm({...newCatForm, budget_limit: e.target.value})}/></div>
-                        
-                        {/* SELECTOR TIPO GASTO/INGRESO (CORREGIDO) */}
                         <div className="bg-[#1e293b] border border-slate-600 rounded p-2">
                              <label className="text-xs text-slate-400 block mb-1">Tipo de Categoría</label>
-                             <select 
-                                className="w-full bg-transparent text-white text-sm outline-none cursor-pointer"
-                                value={newCatForm.is_income ? 'income' : 'expense'} 
-                                onChange={e => setNewCatForm({...newCatForm, is_income: e.target.value === 'income'})}
-                             >
-                                <option value="expense" className="bg-[#1e293b]">Gasto</option>
-                                <option value="income" className="bg-[#1e293b]">Ingreso</option>
+                             <select className="w-full bg-transparent text-white text-sm outline-none cursor-pointer" value={newCatForm.is_income ? 'income' : 'expense'} onChange={e => setNewCatForm({...newCatForm, is_income: e.target.value === 'income'})}>
+                                <option value="expense" className="bg-[#1e293b]">Gasto (Resta)</option>
+                                <option value="income" className="bg-[#1e293b]">Ingreso (Suma)</option>
                              </select>
                         </div>
-
                         <div className="flex justify-between items-center"><input type="color" value={newCatForm.color} onChange={e => setNewCatForm({...newCatForm, color: e.target.value})}/><button onClick={handleCreateCategory} className="bg-emerald-600 px-4 py-2 rounded text-sm font-bold">Añadir</button></div>
                     </div>
                 </div>
              </div>
+          )}
+
+          {/* MODAL PDF CONFIG (NUEVO) */}
+          {showPdfModal && (
+            <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4">
+              <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-sm border border-slate-700">
+                <div className="flex justify-between mb-4"><h3 className="font-bold flex items-center gap-2"><FileText size={20}/> Generar Informe</h3><button onClick={() => setShowPdfModal(false)}><X/></button></div>
+                <p className="text-sm text-slate-400 mb-4">Selecciona qué gastos quieres incluir:</p>
+                
+                <div className="bg-[#0d1117] p-3 rounded border border-slate-800 mb-4 max-h-40 overflow-y-auto custom-scrollbar">
+                    <label className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded cursor-pointer">
+                        <input type="checkbox" checked={pdfSelectedTags.length === 0} onChange={() => setPdfSelectedTags([])}/>
+                        <span className="text-sm font-bold text-white">Todo (Completo)</span>
+                    </label>
+                    <div className="h-px bg-slate-700 my-1"></div>
+                    {getUniqueTags().map(tag => (
+                        <label key={tag} className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded cursor-pointer">
+                            <input 
+                                type="checkbox" 
+                                checked={pdfSelectedTags.includes(tag)} 
+                                onChange={(e) => {
+                                    if(e.target.checked) setPdfSelectedTags([...pdfSelectedTags, tag]);
+                                    else setPdfSelectedTags(pdfSelectedTags.filter(t => t !== tag));
+                                }}
+                            />
+                            <span className="text-sm text-sky-400">{tag}</span>
+                        </label>
+                    ))}
+                    {getUniqueTags().length === 0 && <p className="text-xs text-slate-500 italic p-2">No hay etiquetas este mes.</p>}
+                </div>
+
+                <button onClick={generatePDF} className="w-full bg-emerald-600 font-bold py-3 rounded-lg hover:bg-emerald-500 transition">Generar PDF</button>
+              </div>
+            </div>
           )}
 
           {/* MODAL ADMIN */}
@@ -395,7 +482,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* MODAL TRANSACCION */}
+          {/* MODAL TRANSACCION (NUEVO CAMPO TAGS) */}
           {showForm && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
               <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md border border-slate-700 space-y-4">
@@ -403,6 +490,10 @@ export default function Dashboard() {
                 <input type="date" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" value={newItem.date} onChange={e => setNewItem({...newItem, date: e.target.value})} />
                 <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Concepto" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})}/>
                 <input type="number" className="w-full bg-[#0f172a] border border-slate-600 rounded p-3" placeholder="Importe" value={newItem.amount} onChange={e => setNewItem({...newItem, amount: e.target.value})}/>
+                
+                {/* CAMPO DE ETIQUETAS NUEVO */}
+                <input className="w-full bg-[#0f172a] border border-slate-600 rounded p-3 text-sm" placeholder="Etiquetas (ej: #vacaciones #fiesta)" value={newItem.tags} onChange={e => setNewItem({...newItem, tags: e.target.value})}/>
+                
                 <div className="grid grid-cols-2 gap-2">
                      <div className="bg-[#0f172a] border border-slate-600 rounded p-3 text-slate-400 text-center text-sm flex items-center justify-center">
                         {categories.find(c => c.name === newItem.category)?.is_income ? 'Ingreso (+)' : 'Gasto (-)'}
@@ -482,14 +573,38 @@ export default function Dashboard() {
             </div>
 
             <div className="md:col-span-4 bg-[#161b22] rounded-xl border border-slate-800 p-4 flex flex-col h-[400px]">
-                <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex gap-2"><Calendar className="text-slate-400"/> Historial</h3><button onClick={exportMonthlyPDF} className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 font-bold hover:bg-emerald-500 hover:text-black transition flex items-center gap-1"><Save size={12}/> PDF</button></div>
+                {/* CABECERA HISTORIAL CON BUSCADOR */}
+                <div className="flex justify-between items-center mb-4 gap-2">
+                    <h3 className="font-bold flex gap-2 whitespace-nowrap"><Calendar className="text-slate-400"/> Historial</h3>
+                    <div className="flex items-center bg-[#0d1117] border border-slate-700 rounded px-2 py-1 flex-1 mx-2">
+                        <Search size={12} className="text-slate-500 mr-2"/>
+                        <input 
+                            className="bg-transparent text-xs text-white outline-none w-full placeholder:text-slate-600" 
+                            placeholder="Buscar (ej: #fiesta)"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
+                    <button onClick={() => setShowPdfModal(true)} className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 font-bold hover:bg-emerald-500 hover:text-black transition flex items-center gap-1"><FileText size={12}/> PDF</button>
+                </div>
+
                 <div className="overflow-y-auto flex-1 space-y-2 custom-scrollbar">
-                    {currentMonthTransactions.map(t => (
-                        <div key={t.id} className="flex justify-between items-center p-2 rounded bg-[#0d1117] border border-slate-800 group text-xs">
-                            <div><p className="font-medium">{t.name}</p><p className="text-[9px] text-slate-500">{t.category}</p></div>
-                            <div className="flex gap-2"><span className={`${t.type==='income'?'text-emerald-400':'text-rose-500'} ${blurClass}`}>{formatEuro(t.type === 'income' ? t.amount : -t.amount)}</span><button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button></div>
-                        </div>
-                    ))}
+                    {displayedTransactions.length === 0 ? (
+                        <p className="text-center text-slate-600 text-xs py-10">No hay movimientos.</p>
+                    ) : (
+                        displayedTransactions.map(t => (
+                            <div key={t.id} className="flex justify-between items-center p-2 rounded bg-[#0d1117] border border-slate-800 group text-xs">
+                                <div>
+                                    <p className="font-medium flex items-center gap-2">
+                                        {t.name}
+                                        {t.tags && <span className="text-[9px] text-sky-400 bg-sky-900/20 px-1 rounded">{t.tags}</span>}
+                                    </p>
+                                    <p className="text-[9px] text-slate-500">{t.category}</p>
+                                </div>
+                                <div className="flex gap-2"><span className={`${t.type==='income'?'text-emerald-400':'text-rose-500'} ${blurClass}`}>{formatEuro(t.type === 'income' ? t.amount : -t.amount)}</span><button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button></div>
+                            </div>
+                        ))
+                    )}
                 </div>
             </div>
 
