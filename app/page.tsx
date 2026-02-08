@@ -11,7 +11,7 @@ import {
   Calendar as CalendarIcon, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays
+  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays, AlertTriangle // AÑADIDO AlertTriangle
 } from 'lucide-react';
 
 import { 
@@ -77,7 +77,7 @@ export default function Dashboard() {
   const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0], tags: '' });
   const [newCatForm, setNewCatForm] = useState({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
   
-  // Formulario Pago Programado (Adaptado para calendario)
+  // Formulario Pago Programado
   const [selectedDay, setSelectedDay] = useState<number | null>(null); 
   const [newSchedule, setNewSchedule] = useState({ name: '', amount: '', category: '', is_recurring: true }); 
 
@@ -139,19 +139,15 @@ export default function Dashboard() {
     return () => clearInterval(checkBanInterval);
   }, [session]);
 
-  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS (ARREGLADA) ---
+  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS (CON SEMÁFORO) ---
   async function processScheduledPayments(userId: string) {
-      // SEMÁFORO: Si ya se está ejecutando, paramos para no duplicar
       if (isProcessingRef.current) return;
-      isProcessingRef.current = true; // Ponemos el semáforo en rojo
+      isProcessingRef.current = true; 
 
       try {
           const { data: schedules } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
           
-          if(!schedules || schedules.length === 0) {
-              return; 
-          }
-          
+          if(!schedules || schedules.length === 0) return;
           setScheduledPayments(schedules); 
 
           const today = new Date();
@@ -163,14 +159,11 @@ export default function Dashboard() {
           for (const pay of schedules) {
               const lastProcessedMonth = pay.last_processed ? pay.last_processed.substring(0, 7) : '';
               
-              // Si hoy es el día (o pasó) Y no se ha procesado este mes
               if (currentDay >= pay.day_of_month && lastProcessedMonth !== currentMonthStr) {
-                  
-                  // DOBLE VERIFICACIÓN: Comprobamos una vez más en DB por si acaso otro proceso ganó la carrera
                   const { data: freshData } = await supabase.from('scheduled_payments').select('last_processed').eq('id', pay.id).single();
                   const freshLastProcessed = freshData?.last_processed ? freshData.last_processed.substring(0, 7) : '';
 
-                  if (freshLastProcessed === currentMonthStr) continue; // Ya se procesó hace milisegundos
+                  if (freshLastProcessed === currentMonthStr) continue; 
 
                   await supabase.from('transactions').insert([{
                       user_id: userId,
@@ -195,16 +188,11 @@ export default function Dashboard() {
           if (processedCount > 0) {
               alert(`✅ Se han generado ${processedCount} cargos automáticos.`);
               fetchTransactions(userId); 
-              // Recargar pagos programados
               const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
               if(data) setScheduledPayments(data);
           }
-
       } catch (error) {
           console.error("Error procesando pagos:", error);
-      } finally {
-           // En este caso NO reseteamos a false, porque queremos que corra solo 1 vez por carga de página.
-           // Si el usuario recarga la página, el ref se reinicia solo.
       }
   }
 
@@ -716,17 +704,53 @@ export default function Dashboard() {
                 {categories.map((cat) => {
                     const used = currentMonthTransactions.filter(t => t.category === cat.name && t.type === (cat.is_income ? 'income' : 'expense')).reduce((acc, t) => acc + t.amount, 0);
                     const limit = cat.budget_limit || 0;
+                    
+                    // CÁLCULO DE EXCESO
+                    const isOverLimit = limit > 0 && used > limit;
+                    const excessAmount = used - limit;
+                    const excessPct = limit > 0 ? ((excessAmount / limit) * 100) : 0;
                     const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
+                    
+                    // Si se pasa, la gráfica se pone roja. Si no, usa el color normal.
+                    const chartColor = isOverLimit ? '#f43f5e' : cat.color;
+
                     return (
                         <div key={cat.id} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: cat.color}}></div>
-                            <h3 className="text-xs font-bold mb-1 uppercase truncate w-full text-center" style={{color: cat.color}}>{cat.name}</h3>
+                            <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: chartColor}}></div>
+                            
+                            <h3 className="text-xs font-bold mb-1 uppercase truncate w-full text-center" style={{color: chartColor}}>
+                                {cat.name}
+                            </h3>
+                            
                             <div className="w-16 h-16 relative mb-2">
-                                <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[{v:used||1},{v:Math.max(limit-used,0)}]} cx="50%" cy="50%" innerRadius={20} outerRadius={26} startAngle={90} endAngle={-270} dataKey="v" stroke="none"><Cell fill={cat.color}/><Cell fill="#30363d"/></Pie></PieChart></ResponsiveContainer>
-                                <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{pct.toFixed(0)}%</div>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie 
+                                            data={isOverLimit ? [{v:1},{v:0}] : [{v:used||1},{v:Math.max(limit-used,0)}]} 
+                                            cx="50%" cy="50%" innerRadius={20} outerRadius={26} startAngle={90} endAngle={-270} 
+                                            dataKey="v" stroke="none"
+                                        >
+                                            <Cell fill={chartColor} className={isOverLimit ? "animate-pulse" : ""} />
+                                            <Cell fill="#30363d"/>
+                                        </Pie>
+                                    </PieChart>
+                                </ResponsiveContainer>
+                                <div className={`absolute inset-0 flex items-center justify-center text-[10px] font-bold ${isOverLimit ? 'text-rose-500' : 'text-white'}`}>
+                                    {isOverLimit ? `+${excessPct.toFixed(0)}%` : `${pct.toFixed(0)}%`}
+                                </div>
                             </div>
+                            
                             <p className={`text-lg font-bold ${blurClass}`}>{formatEuro(used)}</p>
-                            <button onClick={() => setEditingLimit({id: cat.id, name: cat.name, amount: limit})} className="text-[9px] text-slate-500 mt-1">Límite: <span className={blurClass}>{formatEuro(limit)}</span></button>
+                            
+                            <button onClick={() => setEditingLimit({id: cat.id, name: cat.name, amount: limit})} className="text-[9px] text-slate-500 mt-1 w-full text-center">
+                                {isOverLimit ? (
+                                    <span className="text-rose-500 font-bold flex items-center justify-center gap-1 animate-pulse">
+                                        <AlertTriangle size={10}/> Excedido: {formatEuro(excessAmount)}
+                                    </span>
+                                ) : (
+                                    <span>Límite: <span className={blurClass}>{formatEuro(limit)}</span></span>
+                                )}
+                            </button>
                         </div>
                     )
                 })}
