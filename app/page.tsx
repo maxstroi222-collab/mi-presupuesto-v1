@@ -8,10 +8,10 @@ import autoTable from 'jspdf-autotable';
 
 import { 
   Plus, Save, X, Trash2, LogOut, User, ChevronLeft, ChevronRight, 
-  Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
+  Calendar as CalendarIcon, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, Ban, Lock, Unlock, Pencil, Clock // AÑADIDO Clock
+  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays
 } from 'lucide-react';
 
 import { 
@@ -34,7 +34,7 @@ export default function Dashboard() {
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [steamItems, setSteamItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
-  const [scheduledPayments, setScheduledPayments] = useState<any[]>([]); // NUEVO: Estado pagos programados
+  const [scheduledPayments, setScheduledPayments] = useState<any[]>([]); 
 
   // ESTADOS DE UI GLOBAL
   const [privacyMode, setPrivacyMode] = useState(false);
@@ -55,7 +55,7 @@ export default function Dashboard() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [showUsersTable, setShowUsersTable] = useState(false);
-  const [showScheduleModal, setShowScheduleModal] = useState(false); // NUEVO: Modal Pagos
+  const [showScheduleModal, setShowScheduleModal] = useState(false); 
   
   const [editingLimit, setEditingLimit] = useState<{id: number, name: string, amount: number} | null>(null);
 
@@ -73,7 +73,10 @@ export default function Dashboard() {
   // Formularios
   const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0], tags: '' });
   const [newCatForm, setNewCatForm] = useState({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
-  const [newSchedule, setNewSchedule] = useState({ name: '', amount: '', category: '', day: '1' }); // NUEVO: Formulario Pago Programado
+  
+  // NUEVO: Formulario Pago Programado (Adaptado para calendario)
+  const [selectedDay, setSelectedDay] = useState<number | null>(null); // Día seleccionado en el calendario
+  const [newSchedule, setNewSchedule] = useState({ name: '', amount: '', category: '', is_recurring: true }); 
 
   // PDF Config
   const [pdfSelectedTags, setPdfSelectedTags] = useState<string[]>([]);
@@ -96,7 +99,6 @@ export default function Dashboard() {
       setSession(session);
       if(session) {
           loadAllData(session.user.id);
-          // Al iniciar sesión, comprobamos si hay pagos pendientes
           processScheduledPayments(session.user.id);
       }
       setLoading(false);
@@ -108,7 +110,6 @@ export default function Dashboard() {
       setSession(session);
       if(session) {
           loadAllData(session.user.id);
-          // Al cambiar de usuario, comprobamos pagos
           processScheduledPayments(session.user.id);
       } else { 
           setAllTransactions([]); setSteamItems([]); setCategories([]); 
@@ -137,50 +138,51 @@ export default function Dashboard() {
 
   // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS ---
   async function processScheduledPayments(userId: string) {
-      // 1. Obtener pagos programados del usuario
       const { data: schedules } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
       if(!schedules || schedules.length === 0) return;
       
-      setScheduledPayments(schedules); // Guardamos para mostrar en el modal
+      setScheduledPayments(schedules); 
 
       const today = new Date();
       const currentDay = today.getDate();
-      // Formato YYYY-MM para comparar si ya se procesó este mes
       const currentMonthStr = `${today.getFullYear()}-${(today.getMonth()+1).toString().padStart(2, '0')}`; 
 
       let processedCount = 0;
 
       for (const pay of schedules) {
-          // Extraemos el YYYY-MM de la última vez que se procesó
           const lastProcessedMonth = pay.last_processed ? pay.last_processed.substring(0, 7) : '';
           
-          // CONDICIÓN: Si hoy es el día (o posterior) Y NO se ha procesado este mes
+          // Si hoy es el día (o pasó) Y no se ha procesado este mes
           if (currentDay >= pay.day_of_month && lastProcessedMonth !== currentMonthStr) {
               
-              // Buscamos la categoría para saber si es ingreso o gasto
-              // (Nota: Como 'categories' puede no estar cargado aún en el useEffect inicial,
-              // hacemos una query rápida o asumimos 'expense' por defecto)
-              
-              // Insertamos la transacción automáticamente
               await supabase.from('transactions').insert([{
                   user_id: userId,
-                  name: `[Auto] ${pay.name}`, // Le ponemos una marca para que se vea claro
+                  name: `[Auto] ${pay.name}`,
                   amount: pay.amount,
-                  type: 'expense', // Por defecto gasto. Si quieres ingresos recurrentes, habría que guardar el tipo en scheduled_payments
+                  type: 'expense', 
                   category: pay.category,
                   date: new Date().toISOString(),
-                  tags: '#automatico'
+                  tags: '#automatico' // ETIQUETA OBLIGATORIA
               }]);
 
-              // Actualizamos la fecha de procesado para que no se repita este mes
-              await supabase.from('scheduled_payments').update({ last_processed: new Date().toISOString() }).eq('id', pay.id);
+              if (pay.is_recurring) {
+                  // Si es recurrente, actualizamos fecha
+                  await supabase.from('scheduled_payments').update({ last_processed: new Date().toISOString() }).eq('id', pay.id);
+              } else {
+                  // Si NO es recurrente (solo este mes), lo borramos tras procesar
+                  await supabase.from('scheduled_payments').delete().eq('id', pay.id);
+              }
+              
               processedCount++;
           }
       }
 
       if (processedCount > 0) {
-          alert(`✅ Se han procesado ${processedCount} pagos programados automáticamente.`);
-          fetchTransactions(userId); // Recargar historial visualmente
+          alert(`✅ Se han generado ${processedCount} cargos automáticos.`);
+          fetchTransactions(userId); 
+          // Recargar pagos programados por si se borró alguno
+          const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
+          if(data) setScheduledPayments(data);
       }
   }
 
@@ -190,7 +192,6 @@ export default function Dashboard() {
     fetchTransactions(targetId);
     fetchSteamPortfolio(targetId);
     
-    // Cargar también los pagos programados para tenerlos listos
     const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', targetId);
     if(data) setScheduledPayments(data);
   }
@@ -221,26 +222,35 @@ export default function Dashboard() {
       : (session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0]);
 
   // --- FUNCIONES GESTIÓN PAGOS PROGRAMADOS ---
+  
+  // Array de días para el calendario
+  const getDaysInMonth = () => {
+      const days = new Date(currentYear, currentMonthIndex + 1, 0).getDate();
+      return Array.from({ length: days }, (_, i) => i + 1);
+  };
+
   async function handleAddSchedule() {
       const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-      if (!newSchedule.name || !newSchedule.amount || !uid) return;
+      if (!newSchedule.name || !newSchedule.amount || !uid || !selectedDay) return;
 
       await supabase.from('scheduled_payments').insert([{
           user_id: uid,
           name: newSchedule.name,
           amount: parseFloat(newSchedule.amount),
           category: newSchedule.category,
-          day_of_month: parseInt(newSchedule.day)
+          day_of_month: selectedDay,
+          is_recurring: newSchedule.is_recurring // True = Todos los meses, False = Solo este
       }]);
 
-      setNewSchedule({ name: '', amount: '', category: categories[0]?.name || '', day: '1' });
-      // Recargar lista
+      setNewSchedule({ name: '', amount: '', category: categories[0]?.name || '', is_recurring: true });
+      setSelectedDay(null); // Cerrar formulario del día
+      
       const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', uid);
       if(data) setScheduledPayments(data);
   }
 
   async function handleDeleteSchedule(id: string) {
-      if(!confirm("¿Dejar de automatizar este pago?")) return;
+      if(!confirm("¿Borrar este pago automático?")) return;
       await supabase.from('scheduled_payments').delete().eq('id', id);
       const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
       const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', uid);
@@ -338,41 +348,104 @@ export default function Dashboard() {
              </div>
           )}
 
-          {/* GESTOR PAGOS PROGRAMADOS (NUEVO) */}
+          {/* CALENDARIO PAGOS PROGRAMADOS (ACTUALIZADO) */}
           {showScheduleModal && (
               <div className="fixed inset-0 bg-black/80 z-[65] flex items-center justify-center p-4">
-                  <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-lg border border-slate-700">
-                      <div className="flex justify-between mb-4"><h3 className="font-bold text-xl flex items-center gap-2"><Clock/> Pagos Automáticos</h3><button onClick={() => setShowScheduleModal(false)}><X/></button></div>
-                      <p className="text-xs text-slate-400 mb-4">Estos pagos se añadirán automáticamente el día que elijas si inicias sesión ese día o después.</p>
-                      
-                      <div className="space-y-2 mb-6 max-h-[30vh] overflow-y-auto custom-scrollbar">
-                          {scheduledPayments.map(pay => (
-                              <div key={pay.id} className="bg-[#0d1117] p-3 rounded border border-slate-800 flex justify-between items-center">
-                                  <div>
-                                      <p className="font-bold text-sm">{pay.name}</p>
-                                      <p className="text-[10px] text-slate-400">Día {pay.day_of_month} de cada mes • {pay.category}</p>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                      <span className="font-mono font-bold text-rose-400">{formatEuro(pay.amount)}</span>
-                                      <button onClick={() => handleDeleteSchedule(pay.id)} className="text-slate-600 hover:text-rose-500"><Trash2 size={16}/></button>
-                                  </div>
-                              </div>
-                          ))}
+                  <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-lg border border-slate-700 max-h-[90vh] flex flex-col">
+                      <div className="flex justify-between mb-4 border-b border-slate-700 pb-2">
+                          <h3 className="font-bold text-xl flex items-center gap-2"><CalendarIcon/> Calendario de Pagos</h3>
+                          <button onClick={() => setShowScheduleModal(false)}><X/></button>
                       </div>
 
-                      <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700 space-y-3">
-                          <input className="w-full bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Nombre (ej: Netflix)" value={newSchedule.name} onChange={e => setNewSchedule({...newSchedule, name: e.target.value})}/>
-                          <div className="grid grid-cols-2 gap-2">
-                              <input type="number" className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Importe" value={newSchedule.amount} onChange={e => setNewSchedule({...newSchedule, amount: e.target.value})}/>
-                              <div className="flex items-center bg-[#1e293b] border border-slate-600 rounded px-2">
-                                  <span className="text-xs text-slate-400 mr-2">Día:</span>
-                                  <input type="number" min="1" max="31" className="bg-transparent w-full text-sm outline-none" value={newSchedule.day} onChange={e => setNewSchedule({...newSchedule, day: e.target.value})}/>
-                              </div>
-                          </div>
-                          <select className="w-full bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" value={newSchedule.category} onChange={e => setNewSchedule({...newSchedule, category: e.target.value})}>
-                              {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                          </select>
-                          <button onClick={handleAddSchedule} className="w-full bg-sky-600 font-bold py-2 rounded text-sm hover:bg-sky-500">Programar Pago</button>
+                      {/* VISTA CALENDARIO */}
+                      <div className="flex-1 overflow-y-auto custom-scrollbar">
+                          {!selectedDay ? (
+                            <div className="grid grid-cols-7 gap-2 text-center mb-4">
+                                {['L','M','X','J','V','S','D'].map(d => <span key={d} className="text-slate-500 text-xs font-bold">{d}</span>)}
+                                {getDaysInMonth().map(day => {
+                                    // Buscar pagos para este día
+                                    const dayPayments = scheduledPayments.filter(p => p.day_of_month === day);
+                                    return (
+                                        <button 
+                                            key={day} 
+                                            onClick={() => setSelectedDay(day)}
+                                            className="aspect-square bg-[#0f172a] rounded border border-slate-700 hover:border-sky-500 transition relative flex flex-col items-center justify-start pt-1"
+                                        >
+                                            <span className="text-xs font-bold text-slate-300">{day}</span>
+                                            <div className="flex gap-0.5 mt-1 flex-wrap justify-center px-1">
+                                                {dayPayments.map((p, i) => (
+                                                    <div 
+                                                        key={i} 
+                                                        className={`w-1.5 h-1.5 rounded-full ${p.is_recurring ? 'bg-sky-500' : 'bg-orange-500'}`} 
+                                                        title={p.name}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                          ) : (
+                            // FORMULARIO DEL DÍA SELECCIONADO
+                            <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700 animate-in fade-in slide-in-from-bottom-4">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h4 className="font-bold text-white flex gap-2"><CalendarDays size={18}/> Día {selectedDay}</h4>
+                                    <button onClick={() => setSelectedDay(null)} className="text-xs text-sky-400 hover:underline">Volver al mes</button>
+                                </div>
+                                
+                                {/* LISTA DE PAGOS DEL DÍA */}
+                                <div className="space-y-2 mb-4">
+                                    {scheduledPayments.filter(p => p.day_of_month === selectedDay).length === 0 && <p className="text-xs text-slate-500 italic">No hay pagos este día.</p>}
+                                    {scheduledPayments.filter(p => p.day_of_month === selectedDay).map(pay => (
+                                        <div key={pay.id} className="flex justify-between items-center bg-[#1e293b] p-2 rounded border border-slate-600">
+                                            <div>
+                                                <p className="font-bold text-sm">{pay.name}</p>
+                                                <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                                                    {pay.is_recurring ? <Repeat size={10} className="text-sky-400"/> : <CalendarIcon size={10} className="text-orange-400"/>}
+                                                    {pay.is_recurring ? 'Todos los meses' : 'Solo este mes'}
+                                                </p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-mono">{formatEuro(pay.amount)}</span>
+                                                <button onClick={() => handleDeleteSchedule(pay.id)} className="text-rose-500 hover:bg-rose-500/10 p-1 rounded"><Trash2 size={14}/></button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="border-t border-slate-700 pt-4 space-y-3">
+                                    <p className="text-xs font-bold text-emerald-400">Programar Nuevo Pago</p>
+                                    <input className="w-full bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Concepto (ej: Netflix)" value={newSchedule.name} onChange={e => setNewSchedule({...newSchedule, name: e.target.value})}/>
+                                    <input type="number" className="w-full bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Importe" value={newSchedule.amount} onChange={e => setNewSchedule({...newSchedule, amount: e.target.value})}/>
+                                    <select className="w-full bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" value={newSchedule.category} onChange={e => setNewSchedule({...newSchedule, category: e.target.value})}>
+                                        {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                    </select>
+                                    
+                                    {/* SELECTOR DE FRECUENCIA */}
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={() => setNewSchedule({...newSchedule, is_recurring: true})}
+                                            className={`flex-1 py-2 text-xs rounded border ${newSchedule.is_recurring ? 'bg-sky-600 text-white border-sky-500' : 'bg-[#1e293b] text-slate-400 border-slate-600'}`}
+                                        >
+                                            Todos los meses
+                                        </button>
+                                        <button 
+                                            onClick={() => setNewSchedule({...newSchedule, is_recurring: false})}
+                                            className={`flex-1 py-2 text-xs rounded border ${!newSchedule.is_recurring ? 'bg-orange-600 text-white border-orange-500' : 'bg-[#1e293b] text-slate-400 border-slate-600'}`}
+                                        >
+                                            Solo este mes
+                                        </button>
+                                    </div>
+
+                                    <button onClick={handleAddSchedule} className="w-full bg-emerald-600 font-bold py-2 rounded text-sm hover:bg-emerald-500">Guardar</button>
+                                </div>
+                            </div>
+                          )}
+                      </div>
+                      
+                      <div className="mt-4 pt-2 border-t border-slate-700 flex justify-between text-[10px] text-slate-400">
+                          <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-sky-500"></div> Recurrente</span>
+                          <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Un solo pago</span>
                       </div>
                   </div>
               </div>
@@ -586,7 +659,7 @@ export default function Dashboard() {
 
             <div className="md:col-span-4 bg-[#161b22] rounded-xl border border-slate-800 p-4 flex flex-col h-[400px]">
                 <div className="flex justify-between items-center mb-4 gap-2">
-                    <h3 className="font-bold flex gap-2 whitespace-nowrap"><Calendar className="text-slate-400"/> Historial</h3>
+                    <h3 className="font-bold flex gap-2 whitespace-nowrap"><CalendarIcon className="text-slate-400"/> Historial</h3>
                     <div className="flex items-center bg-[#0d1117] border border-slate-700 rounded px-2 py-1 flex-1 mx-2">
                         <Search size={12} className="text-slate-500 mr-2"/>
                         <input className="bg-transparent text-xs text-white outline-none w-full placeholder:text-slate-600" placeholder="Buscar (ej: #fiesta)" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
