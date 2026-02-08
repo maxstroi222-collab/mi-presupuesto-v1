@@ -44,6 +44,9 @@ export default function Dashboard() {
   const [impersonatedUser, setImpersonatedUser] = useState<{id: string, email: string} | null>(null);
   const impersonatingRef = useRef<{id: string, email: string} | null>(null);
 
+  // SEMÁFORO PARA EVITAR COBROS DUPLICADOS
+  const isProcessingRef = useRef(false);
+
   const [usersList, setUsersList] = useState<any[]>([]); 
 
   // MODALES Y EDICIÓN
@@ -74,8 +77,8 @@ export default function Dashboard() {
   const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0], tags: '' });
   const [newCatForm, setNewCatForm] = useState({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
   
-  // NUEVO: Formulario Pago Programado (Adaptado para calendario)
-  const [selectedDay, setSelectedDay] = useState<number | null>(null); // Día seleccionado en el calendario
+  // Formulario Pago Programado (Adaptado para calendario)
+  const [selectedDay, setSelectedDay] = useState<number | null>(null); 
   const [newSchedule, setNewSchedule] = useState({ name: '', amount: '', category: '', is_recurring: true }); 
 
   // PDF Config
@@ -136,53 +139,72 @@ export default function Dashboard() {
     return () => clearInterval(checkBanInterval);
   }, [session]);
 
-  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS ---
+  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS (ARREGLADA) ---
   async function processScheduledPayments(userId: string) {
-      const { data: schedules } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
-      if(!schedules || schedules.length === 0) return;
-      
-      setScheduledPayments(schedules); 
+      // SEMÁFORO: Si ya se está ejecutando, paramos para no duplicar
+      if (isProcessingRef.current) return;
+      isProcessingRef.current = true; // Ponemos el semáforo en rojo
 
-      const today = new Date();
-      const currentDay = today.getDate();
-      const currentMonthStr = `${today.getFullYear()}-${(today.getMonth()+1).toString().padStart(2, '0')}`; 
-
-      let processedCount = 0;
-
-      for (const pay of schedules) {
-          const lastProcessedMonth = pay.last_processed ? pay.last_processed.substring(0, 7) : '';
+      try {
+          const { data: schedules } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
           
-          // Si hoy es el día (o pasó) Y no se ha procesado este mes
-          if (currentDay >= pay.day_of_month && lastProcessedMonth !== currentMonthStr) {
-              
-              await supabase.from('transactions').insert([{
-                  user_id: userId,
-                  name: `[Auto] ${pay.name}`,
-                  amount: pay.amount,
-                  type: 'expense', 
-                  category: pay.category,
-                  date: new Date().toISOString(),
-                  tags: '#automatico' // ETIQUETA OBLIGATORIA
-              }]);
-
-              if (pay.is_recurring) {
-                  // Si es recurrente, actualizamos fecha
-                  await supabase.from('scheduled_payments').update({ last_processed: new Date().toISOString() }).eq('id', pay.id);
-              } else {
-                  // Si NO es recurrente (solo este mes), lo borramos tras procesar
-                  await supabase.from('scheduled_payments').delete().eq('id', pay.id);
-              }
-              
-              processedCount++;
+          if(!schedules || schedules.length === 0) {
+              return; 
           }
-      }
+          
+          setScheduledPayments(schedules); 
 
-      if (processedCount > 0) {
-          alert(`✅ Se han generado ${processedCount} cargos automáticos.`);
-          fetchTransactions(userId); 
-          // Recargar pagos programados por si se borró alguno
-          const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
-          if(data) setScheduledPayments(data);
+          const today = new Date();
+          const currentDay = today.getDate();
+          const currentMonthStr = `${today.getFullYear()}-${(today.getMonth()+1).toString().padStart(2, '0')}`; 
+
+          let processedCount = 0;
+
+          for (const pay of schedules) {
+              const lastProcessedMonth = pay.last_processed ? pay.last_processed.substring(0, 7) : '';
+              
+              // Si hoy es el día (o pasó) Y no se ha procesado este mes
+              if (currentDay >= pay.day_of_month && lastProcessedMonth !== currentMonthStr) {
+                  
+                  // DOBLE VERIFICACIÓN: Comprobamos una vez más en DB por si acaso otro proceso ganó la carrera
+                  const { data: freshData } = await supabase.from('scheduled_payments').select('last_processed').eq('id', pay.id).single();
+                  const freshLastProcessed = freshData?.last_processed ? freshData.last_processed.substring(0, 7) : '';
+
+                  if (freshLastProcessed === currentMonthStr) continue; // Ya se procesó hace milisegundos
+
+                  await supabase.from('transactions').insert([{
+                      user_id: userId,
+                      name: `[Auto] ${pay.name}`,
+                      amount: pay.amount,
+                      type: 'expense', 
+                      category: pay.category,
+                      date: new Date().toISOString(),
+                      tags: '#automatico' 
+                  }]);
+
+                  if (pay.is_recurring) {
+                      await supabase.from('scheduled_payments').update({ last_processed: new Date().toISOString() }).eq('id', pay.id);
+                  } else {
+                      await supabase.from('scheduled_payments').delete().eq('id', pay.id);
+                  }
+                  
+                  processedCount++;
+              }
+          }
+
+          if (processedCount > 0) {
+              alert(`✅ Se han generado ${processedCount} cargos automáticos.`);
+              fetchTransactions(userId); 
+              // Recargar pagos programados
+              const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
+              if(data) setScheduledPayments(data);
+          }
+
+      } catch (error) {
+          console.error("Error procesando pagos:", error);
+      } finally {
+           // En este caso NO reseteamos a false, porque queremos que corra solo 1 vez por carga de página.
+           // Si el usuario recarga la página, el ref se reinicia solo.
       }
   }
 
@@ -222,8 +244,6 @@ export default function Dashboard() {
       : (session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0]);
 
   // --- FUNCIONES GESTIÓN PAGOS PROGRAMADOS ---
-  
-  // Array de días para el calendario
   const getDaysInMonth = () => {
       const days = new Date(currentYear, currentMonthIndex + 1, 0).getDate();
       return Array.from({ length: days }, (_, i) => i + 1);
@@ -239,11 +259,11 @@ export default function Dashboard() {
           amount: parseFloat(newSchedule.amount),
           category: newSchedule.category,
           day_of_month: selectedDay,
-          is_recurring: newSchedule.is_recurring // True = Todos los meses, False = Solo este
+          is_recurring: newSchedule.is_recurring 
       }]);
 
       setNewSchedule({ name: '', amount: '', category: categories[0]?.name || '', is_recurring: true });
-      setSelectedDay(null); // Cerrar formulario del día
+      setSelectedDay(null); 
       
       const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', uid);
       if(data) setScheduledPayments(data);
