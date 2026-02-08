@@ -11,7 +11,7 @@ import {
   Calendar as CalendarIcon, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays, AlertTriangle // AÑADIDO AlertTriangle
+  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays, AlertTriangle, TrendingUp // AÑADIDO TrendingUp
 } from 'lucide-react';
 
 import { 
@@ -702,17 +702,36 @@ export default function Dashboard() {
 
             <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-5 gap-4">
                 {categories.map((cat) => {
+                    // FILTRO DE NÓMINA: Si se llama Nomina o Nómina, no renderiza este bloque.
+                    if (['nomina', 'nómina'].includes(cat.name.toLowerCase())) return null;
+
                     const used = currentMonthTransactions.filter(t => t.category === cat.name && t.type === (cat.is_income ? 'income' : 'expense')).reduce((acc, t) => acc + t.amount, 0);
                     const limit = cat.budget_limit || 0;
                     
-                    // CÁLCULO DE EXCESO
+                    // CÁLCULO DE EXCESO / META SUPERADA
                     const isOverLimit = limit > 0 && used > limit;
                     const excessAmount = used - limit;
                     const excessPct = limit > 0 ? ((excessAmount / limit) * 100) : 0;
                     const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
                     
-                    // Si se pasa, la gráfica se pone roja. Si no, usa el color normal.
-                    const chartColor = isOverLimit ? '#f43f5e' : cat.color;
+                    // LOGICA DE COLORES
+                    // Si es gasto y te pasas -> Rojo (Malo)
+                    // Si es ingreso y te pasas -> Verde/Oro (Bueno)
+                    let chartColor = cat.color;
+                    let percentageText = `${pct.toFixed(0)}%`;
+                    let statusIcon = null;
+
+                    if (isOverLimit) {
+                        if (cat.is_income) {
+                             chartColor = '#fbbf24'; // Un dorado/ambar para "Logro desbloqueado"
+                             percentageText = `+${excessPct.toFixed(0)}%`;
+                             statusIcon = <TrendingUp size={10}/>;
+                        } else {
+                             chartColor = '#f43f5e'; // Rojo alarma
+                             percentageText = `+${excessPct.toFixed(0)}%`;
+                             statusIcon = <AlertTriangle size={10}/>;
+                        }
+                    }
 
                     return (
                         <div key={cat.id} className="bg-[#161b22] p-4 rounded-xl border border-slate-800 flex flex-col items-center relative overflow-hidden">
@@ -730,22 +749,23 @@ export default function Dashboard() {
                                             cx="50%" cy="50%" innerRadius={20} outerRadius={26} startAngle={90} endAngle={-270} 
                                             dataKey="v" stroke="none"
                                         >
-                                            <Cell fill={chartColor} className={isOverLimit ? "animate-pulse" : ""} />
+                                            <Cell fill={chartColor} className={isOverLimit && !cat.is_income ? "animate-pulse" : ""} />
                                             <Cell fill="#30363d"/>
                                         </Pie>
                                     </PieChart>
                                 </ResponsiveContainer>
-                                <div className={`absolute inset-0 flex items-center justify-center text-[10px] font-bold ${isOverLimit ? 'text-rose-500' : 'text-white'}`}>
-                                    {isOverLimit ? `+${excessPct.toFixed(0)}%` : `${pct.toFixed(0)}%`}
+                                <div className={`absolute inset-0 flex items-center justify-center text-[10px] font-bold ${isOverLimit && !cat.is_income ? 'text-rose-500' : 'text-white'}`}>
+                                    {percentageText}
                                 </div>
                             </div>
                             
                             <p className={`text-lg font-bold ${blurClass}`}>{formatEuro(used)}</p>
                             
+                            {/* BOTÓN INFERIOR CON INFORMACIÓN DE LÍMITE */}
                             <button onClick={() => setEditingLimit({id: cat.id, name: cat.name, amount: limit})} className="text-[9px] text-slate-500 mt-1 w-full text-center">
                                 {isOverLimit ? (
-                                    <span className="text-rose-500 font-bold flex items-center justify-center gap-1 animate-pulse">
-                                        <AlertTriangle size={10}/> Excedido: {formatEuro(excessAmount)}
+                                    <span className={`${cat.is_income ? 'text-amber-400' : 'text-rose-500'} font-bold flex items-center justify-center gap-1`}>
+                                        {statusIcon} Límite: {formatEuro(limit)} ({cat.is_income ? '+' : '-'}{formatEuro(excessAmount)})
                                     </span>
                                 ) : (
                                     <span>Límite: <span className={blurClass}>{formatEuro(limit)}</span></span>
