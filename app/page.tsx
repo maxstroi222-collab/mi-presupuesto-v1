@@ -11,7 +11,7 @@ import {
   Calendar as CalendarIcon, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays, AlertTriangle, TrendingUp, AlertOctagon // AÑADIDO AlertOctagon
+  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays, AlertTriangle, TrendingUp, AlertOctagon 
 } from 'lucide-react';
 
 import { 
@@ -139,7 +139,7 @@ export default function Dashboard() {
     return () => clearInterval(checkBanInterval);
   }, [session]);
 
-  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS ---
+  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS (CON SEMÁFORO) ---
   async function processScheduledPayments(userId: string) {
       if (isProcessingRef.current) return;
       isProcessingRef.current = true; 
@@ -271,7 +271,7 @@ export default function Dashboard() {
   const stopImpersonation = () => { setImpersonatedUser(null); impersonatingRef.current = null; if (session) loadAllData(session.user.id); };
   const toggleBanUser = async (userId: string, currentStatus: boolean, email: string) => { if(!confirm(`¿${currentStatus ? 'Desbanear' : 'Banear'} a ${email}?`)) return; const { error } = await supabase.rpc('toggle_ban_user', { target_user_id: userId }); if(!error) fetchUsersList(); else alert("Error al banear: " + error.message); };
   
-  // NUEVA FUNCIÓN DE BORRADO
+  // FUNCIÓN DE BORRADO
   const handleDeleteUser = async (userId: string, email: string) => {
       if (!confirm(`⚠️ ¡PELIGRO!\n\n¿Estás seguro de que quieres ELIMINAR a ${email}?\n\nEsta acción borrará TODOS sus datos (transacciones, categorías, steam) permanentemente y NO SE PUEDE DESHACER.`)) return;
       
@@ -785,7 +785,9 @@ export default function Dashboard() {
                             <button onClick={() => setEditingLimit({id: cat.id, name: cat.name, amount: limit})} className="text-[9px] text-slate-500 mt-1 w-full text-center">
                                 {isOverLimit ? (
                                     <span className={`${cat.is_income ? 'text-amber-400' : 'text-rose-500'} font-bold flex items-center justify-center gap-1`}>
-                                        {statusIcon} Límite: {formatEuro(limit)} ({cat.is_income ? '+' : '-'}{formatEuro(excessAmount)})
+                                        {statusIcon} 
+                                        Límite: <span className={blurClass}>{formatEuro(limit)}</span> 
+                                        (<span className={blurClass}>{cat.is_income ? '+' : '-'}{formatEuro(excessAmount)}</span>)
                                     </span>
                                 ) : (
                                     <span>Límite: <span className={blurClass}>{formatEuro(limit)}</span></span>
