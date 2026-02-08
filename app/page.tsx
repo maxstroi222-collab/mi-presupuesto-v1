@@ -11,7 +11,7 @@ import {
   Calendar as CalendarIcon, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays, AlertTriangle, TrendingUp // AÑADIDO TrendingUp
+  Users, Ban, Lock, Unlock, Pencil, Clock, Repeat, CalendarDays, AlertTriangle, TrendingUp, AlertOctagon // AÑADIDO AlertOctagon
 } from 'lucide-react';
 
 import { 
@@ -139,7 +139,7 @@ export default function Dashboard() {
     return () => clearInterval(checkBanInterval);
   }, [session]);
 
-  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS (CON SEMÁFORO) ---
+  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS ---
   async function processScheduledPayments(userId: string) {
       if (isProcessingRef.current) return;
       isProcessingRef.current = true; 
@@ -270,6 +270,19 @@ export default function Dashboard() {
   const startImpersonation = (targetUser: any) => { if(!confirm(`¿Estás seguro de que quieres entrar como ${targetUser.email}?`)) return; const target = { id: targetUser.id, email: targetUser.email }; setImpersonatedUser(target); impersonatingRef.current = target; setUsersList([]); setShowUsersTable(false); setShowAdminPanel(false); loadAllData(target.id); };
   const stopImpersonation = () => { setImpersonatedUser(null); impersonatingRef.current = null; if (session) loadAllData(session.user.id); };
   const toggleBanUser = async (userId: string, currentStatus: boolean, email: string) => { if(!confirm(`¿${currentStatus ? 'Desbanear' : 'Banear'} a ${email}?`)) return; const { error } = await supabase.rpc('toggle_ban_user', { target_user_id: userId }); if(!error) fetchUsersList(); else alert("Error al banear: " + error.message); };
+  
+  // NUEVA FUNCIÓN DE BORRADO
+  const handleDeleteUser = async (userId: string, email: string) => {
+      if (!confirm(`⚠️ ¡PELIGRO!\n\n¿Estás seguro de que quieres ELIMINAR a ${email}?\n\nEsta acción borrará TODOS sus datos (transacciones, categorías, steam) permanentemente y NO SE PUEDE DESHACER.`)) return;
+      
+      const { error } = await supabase.rpc('delete_user_by_admin', { target_user_id: userId });
+      if (error) {
+          alert("Error al borrar: " + error.message);
+      } else {
+          alert("Usuario eliminado correctamente.");
+          fetchUsersList();
+      }
+  };
 
   // --- RESTO DE FUNCIONES ---
   async function fetchCategories(userId: string) { const { data } = await supabase.from('user_categories').select('*').eq('user_id', userId).order('created_at', { ascending: true }); if (data) { setCategories(data); if (data.length > 0 && !newItem.category) { setNewItem(prev => ({ ...prev, category: data[0].name })); setNewSchedule(prev => ({ ...prev, category: data[0].name })); } } }
@@ -515,7 +528,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* MODAL LISTA DE USUARIOS (CON BAN) */}
+          {/* MODAL LISTA DE USUARIOS (CON BAN Y BORRAR) */}
           {showUsersTable && (
             <div className="fixed inset-0 bg-black/90 z-[80] flex items-center justify-center p-4">
                 <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-5xl border border-slate-700 h-[80vh] flex flex-col">
@@ -550,6 +563,13 @@ export default function Dashboard() {
                                                 {user.is_banned ? <Lock size={14} className="mx-auto text-red-500"/> : <Unlock size={14} className="mx-auto text-emerald-500"/>}
                                             </td>
                                             <td className="p-3 text-right flex justify-end gap-2">
+                                                <button 
+                                                    onClick={() => handleDeleteUser(user.id, user.email)}
+                                                    className="bg-rose-950/40 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/30 px-3 py-1 rounded text-xs font-bold transition flex items-center gap-2"
+                                                    title="Eliminar usuario permanentemente"
+                                                >
+                                                    <Trash2 size={12}/>
+                                                </button>
                                                 <button 
                                                     onClick={() => toggleBanUser(user.id, user.is_banned, user.email)}
                                                     className={`px-3 py-1 rounded text-xs font-bold transition flex items-center gap-2 border ${user.is_banned ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/50' : 'bg-red-600/20 text-red-400 border-red-500/50'}`}
