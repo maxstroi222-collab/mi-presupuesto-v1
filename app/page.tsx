@@ -123,7 +123,7 @@ export default function Dashboard() {
         
         if (!error && isBanned === true) {
             clearInterval(checkBanInterval);
-            alert("🚫 TU CUENTA HA SIDO SUSPENDIDA POR EL ADMINISTRADOR.\n\nSe cerrará la sesión inmediatamente.");
+            alert("TU CUENTA HA BANEADA SUSPENDIDA POR EL ADMINISTRADOR.\n\nSe cerrará la sesión inmediatamente.");
             await supabase.auth.signOut();
             window.location.reload(); 
         }
