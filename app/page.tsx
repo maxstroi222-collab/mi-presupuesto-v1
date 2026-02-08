@@ -11,7 +11,7 @@ import {
   Calendar, Gamepad2, Search, Loader2, RefreshCw, Box, Shield, 
   Megaphone, Settings, Tag, Eye, EyeOff, TrendingDown, 
   Activity, CheckCircle, XCircle, Play, Terminal, Filter, FileText,
-  Users, Ban, Lock, Unlock, Pencil // AÑADIDO Pencil
+  Users, Ban, Lock, Unlock, Pencil, Clock // AÑADIDO Clock
 } from 'lucide-react';
 
 import { 
@@ -34,6 +34,7 @@ export default function Dashboard() {
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [steamItems, setSteamItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [scheduledPayments, setScheduledPayments] = useState<any[]>([]); // NUEVO: Estado pagos programados
 
   // ESTADOS DE UI GLOBAL
   const [privacyMode, setPrivacyMode] = useState(false);
@@ -47,13 +48,14 @@ export default function Dashboard() {
 
   // MODALES Y EDICIÓN
   const [showForm, setShowForm] = useState(false);
-  const [editingTransaction, setEditingTransaction] = useState<any>(null); // NUEVO: Estado para saber qué editamos
+  const [editingTransaction, setEditingTransaction] = useState<any>(null);
 
   const [showSteamForm, setShowSteamForm] = useState(false);
   const [showCatManager, setShowCatManager] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [showUsersTable, setShowUsersTable] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false); // NUEVO: Modal Pagos
   
   const [editingLimit, setEditingLimit] = useState<{id: number, name: string, amount: number} | null>(null);
 
@@ -71,6 +73,7 @@ export default function Dashboard() {
   // Formularios
   const [newItem, setNewItem] = useState({ name: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0], tags: '' });
   const [newCatForm, setNewCatForm] = useState({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
+  const [newSchedule, setNewSchedule] = useState({ name: '', amount: '', category: '', day: '1' }); // NUEVO: Formulario Pago Programado
 
   // PDF Config
   const [pdfSelectedTags, setPdfSelectedTags] = useState<string[]>([]);
@@ -93,6 +96,8 @@ export default function Dashboard() {
       setSession(session);
       if(session) {
           loadAllData(session.user.id);
+          // Al iniciar sesión, comprobamos si hay pagos pendientes
+          processScheduledPayments(session.user.id);
       }
       setLoading(false);
     });
@@ -103,6 +108,8 @@ export default function Dashboard() {
       setSession(session);
       if(session) {
           loadAllData(session.user.id);
+          // Al cambiar de usuario, comprobamos pagos
+          processScheduledPayments(session.user.id);
       } else { 
           setAllTransactions([]); setSteamItems([]); setCategories([]); 
       }
@@ -115,30 +122,77 @@ export default function Dashboard() {
   // --- REAL-TIME BAN CHECKER ---
   useEffect(() => {
     if (!session) return;
-
     const checkBanInterval = setInterval(async () => {
         if (impersonatingRef.current) return;
-
         const { data: isBanned, error } = await supabase.rpc('am_i_banned');
-        
         if (!error && isBanned === true) {
             clearInterval(checkBanInterval);
-            alert("TU CUENTA HA BANEADA SUSPENDIDA POR EL ADMINISTRADOR.\n\nSe cerrará la sesión inmediatamente.");
+            alert("🚫 TU CUENTA HA SIDO SUSPENDIDA POR EL ADMINISTRADOR.\n\nSe cerrará la sesión inmediatamente.");
             await supabase.auth.signOut();
             window.location.reload(); 
         }
     }, 4000); 
-
     return () => clearInterval(checkBanInterval);
   }, [session]);
 
+  // --- LÓGICA DE AUTOMATIZACIÓN DE PAGOS ---
+  async function processScheduledPayments(userId: string) {
+      // 1. Obtener pagos programados del usuario
+      const { data: schedules } = await supabase.from('scheduled_payments').select('*').eq('user_id', userId);
+      if(!schedules || schedules.length === 0) return;
+      
+      setScheduledPayments(schedules); // Guardamos para mostrar en el modal
+
+      const today = new Date();
+      const currentDay = today.getDate();
+      // Formato YYYY-MM para comparar si ya se procesó este mes
+      const currentMonthStr = `${today.getFullYear()}-${(today.getMonth()+1).toString().padStart(2, '0')}`; 
+
+      let processedCount = 0;
+
+      for (const pay of schedules) {
+          // Extraemos el YYYY-MM de la última vez que se procesó
+          const lastProcessedMonth = pay.last_processed ? pay.last_processed.substring(0, 7) : '';
+          
+          // CONDICIÓN: Si hoy es el día (o posterior) Y NO se ha procesado este mes
+          if (currentDay >= pay.day_of_month && lastProcessedMonth !== currentMonthStr) {
+              
+              // Buscamos la categoría para saber si es ingreso o gasto
+              // (Nota: Como 'categories' puede no estar cargado aún en el useEffect inicial,
+              // hacemos una query rápida o asumimos 'expense' por defecto)
+              
+              // Insertamos la transacción automáticamente
+              await supabase.from('transactions').insert([{
+                  user_id: userId,
+                  name: `[Auto] ${pay.name}`, // Le ponemos una marca para que se vea claro
+                  amount: pay.amount,
+                  type: 'expense', // Por defecto gasto. Si quieres ingresos recurrentes, habría que guardar el tipo en scheduled_payments
+                  category: pay.category,
+                  date: new Date().toISOString(),
+                  tags: '#automatico'
+              }]);
+
+              // Actualizamos la fecha de procesado para que no se repita este mes
+              await supabase.from('scheduled_payments').update({ last_processed: new Date().toISOString() }).eq('id', pay.id);
+              processedCount++;
+          }
+      }
+
+      if (processedCount > 0) {
+          alert(`✅ Se han procesado ${processedCount} pagos programados automáticamente.`);
+          fetchTransactions(userId); // Recargar historial visualmente
+      }
+  }
 
   async function loadAllData(userId: string) {
     const targetId = impersonatingRef.current ? impersonatingRef.current.id : userId;
-
     await fetchCategories(targetId);
     fetchTransactions(targetId);
     fetchSteamPortfolio(targetId);
+    
+    // Cargar también los pagos programados para tenerlos listos
+    const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', targetId);
+    if(data) setScheduledPayments(data);
   }
 
   // --- DATOS FILTRADOS ---
@@ -166,332 +220,63 @@ export default function Dashboard() {
       ? `(Viendo a) ${impersonatedUser.email}` 
       : (session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0]);
 
+  // --- FUNCIONES GESTIÓN PAGOS PROGRAMADOS ---
+  async function handleAddSchedule() {
+      const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
+      if (!newSchedule.name || !newSchedule.amount || !uid) return;
+
+      await supabase.from('scheduled_payments').insert([{
+          user_id: uid,
+          name: newSchedule.name,
+          amount: parseFloat(newSchedule.amount),
+          category: newSchedule.category,
+          day_of_month: parseInt(newSchedule.day)
+      }]);
+
+      setNewSchedule({ name: '', amount: '', category: categories[0]?.name || '', day: '1' });
+      // Recargar lista
+      const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', uid);
+      if(data) setScheduledPayments(data);
+  }
+
+  async function handleDeleteSchedule(id: string) {
+      if(!confirm("¿Dejar de automatizar este pago?")) return;
+      await supabase.from('scheduled_payments').delete().eq('id', id);
+      const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
+      const { data } = await supabase.from('scheduled_payments').select('*').eq('user_id', uid);
+      if(data) setScheduledPayments(data);
+  }
+
   // --- FUNCIONES ADMIN ---
-  
-  const fetchUsersList = async () => {
-      const { data, error } = await supabase.rpc('get_admin_users_list');
-      if (data) setUsersList(data);
-      if (error) alert("Error cargando usuarios: " + error.message);
-  };
-
-  const startImpersonation = (targetUser: any) => {
-      if(!confirm(`¿Estás seguro de que quieres entrar como ${targetUser.email}?`)) return;
-      
-      const target = { id: targetUser.id, email: targetUser.email };
-      
-      setImpersonatedUser(target);
-      impersonatingRef.current = target;
-
-      setUsersList([]); 
-      setShowUsersTable(false); 
-      setShowAdminPanel(false); 
-      
-      fetchCategories(targetUser.id);
-      fetchTransactions(targetUser.id);
-      fetchSteamPortfolio(targetUser.id);
-  };
-
-  const stopImpersonation = () => {
-      setImpersonatedUser(null);
-      impersonatingRef.current = null;
-      if (session) loadAllData(session.user.id);
-  };
-
-  const toggleBanUser = async (userId: string, currentStatus: boolean, email: string) => {
-      if(!confirm(`¿${currentStatus ? 'Desbanear' : 'Banear'} a ${email}?`)) return;
-      
-      const { error } = await supabase.rpc('toggle_ban_user', { target_user_id: userId });
-      if(!error) {
-          fetchUsersList(); 
-      } else {
-          alert("Error al banear: " + error.message);
-      }
-  };
+  const fetchUsersList = async () => { const { data, error } = await supabase.rpc('get_admin_users_list'); if (data) setUsersList(data); if (error) alert("Error cargando usuarios: " + error.message); };
+  const startImpersonation = (targetUser: any) => { if(!confirm(`¿Estás seguro de que quieres entrar como ${targetUser.email}?`)) return; const target = { id: targetUser.id, email: targetUser.email }; setImpersonatedUser(target); impersonatingRef.current = target; setUsersList([]); setShowUsersTable(false); setShowAdminPanel(false); loadAllData(target.id); };
+  const stopImpersonation = () => { setImpersonatedUser(null); impersonatingRef.current = null; if (session) loadAllData(session.user.id); };
+  const toggleBanUser = async (userId: string, currentStatus: boolean, email: string) => { if(!confirm(`¿${currentStatus ? 'Desbanear' : 'Banear'} a ${email}?`)) return; const { error } = await supabase.rpc('toggle_ban_user', { target_user_id: userId }); if(!error) fetchUsersList(); else alert("Error al banear: " + error.message); };
 
   // --- RESTO DE FUNCIONES ---
-
-  async function fetchCategories(userId: string) {
-    const { data } = await supabase.from('user_categories').select('*').eq('user_id', userId).order('created_at', { ascending: true });
-    if (data) {
-        setCategories(data);
-        if (data.length > 0 && !newItem.category) setNewItem(prev => ({ ...prev, category: data[0].name }));
-    }
-  }
-
-  async function fetchTransactions(userId?: string) {
-    const uid = userId || (impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id);
-    if(!uid) return;
-    const { data } = await supabase.from('transactions').select('*').eq('user_id', uid).order('date', { ascending: false });
-    if (data) setAllTransactions(data);
-  }
-
-  async function fetchSteamPortfolio(userId?: string) {
-    const uid = userId || (impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id);
-    if(!uid) return;
-    const { data } = await supabase.from('steam_portfolio').select('*').eq('user_id', uid);
-    if (data) setSteamItems(data);
-  }
-
-  async function handleCreateCategory() {
-    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-    if (!newCatForm.name || !uid) return;
-    await supabase.from('user_categories').insert([{ user_id: uid, name: newCatForm.name, color: newCatForm.color, is_income: newCatForm.is_income, budget_limit: parseFloat(newCatForm.budget_limit) || 0 }]);
-    setNewCatForm({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' });
-    fetchCategories(uid);
-  }
-
-  async function handleDeleteCategory(id: number, name: string) {
-    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-    if(confirm(`¿Borrar "${name}"?`)) {
-      await supabase.from('user_categories').delete().eq('id', id);
-      fetchCategories(uid);
-    }
-  }
-
-  async function handleUpdateLimit() {
-    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-    if (!editingLimit || !uid) return;
-    await supabase.from('user_categories').update({ budget_limit: editingLimit.amount }).eq('id', editingLimit.id);
-    setEditingLimit(null);
-    fetchCategories(uid);
-  }
-
-  const parseSteamPrice = (priceStr: string) => {
-    let clean = priceStr.replace('€', '').replace('$', '').replace(',', '.').trim();
-    clean = clean.replace('--', '00').replace('-', '00');
-    return parseFloat(clean);
-  };
-
-  async function getSteamPrice() {
-    if(!newSteamItem.name) return;
-    setFetchingPrice(true);
-    try {
-        const res = await fetch(`/api/steam?name=${encodeURIComponent(newSteamItem.name)}`);
-        const data = await res.json();
-        const p = data.lowest_price || data.median_price;
-        if (p) setNewSteamItem(prev => ({ ...prev, price: parseSteamPrice(p).toString() }));
-    } catch (e) {}
-    setFetchingPrice(false);
-  }
-
-  async function refreshAllSteamPrices() {
-    setRefreshingSteam(true);
-    for (const item of steamItems) {
-        const res = await fetch(`/api/steam?name=${encodeURIComponent(item.item_name)}`);
-        const data = await res.json();
-        const p = data.lowest_price || data.median_price;
-        if (p) await supabase.from('steam_portfolio').update({ current_price: parseSteamPrice(p) }).eq('id', item.id);
-    }
-    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-    fetchSteamPortfolio(uid);
-    setRefreshingSteam(false);
-  }
-
-  // --- ABRIR MODAL PARA EDITAR ---
-  const handleEditTransaction = (t: any) => {
-      setEditingTransaction(t);
-      setNewItem({
-          name: t.name,
-          amount: t.amount,
-          type: t.type,
-          category: t.category,
-          date: new Date(t.date).toISOString().split('T')[0],
-          tags: t.tags || ''
-      });
-      setShowForm(true);
-  };
-
-  // --- GUARDAR TRANSACCIÓN (CREAR O ACTUALIZAR) ---
-  async function handleSaveTransaction() {
-    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-    if (!newItem.name || !newItem.amount || !uid) return;
-    const selectedCat = categories.find(c => c.name === newItem.category);
-    const type = selectedCat?.is_income ? 'income' : 'expense';
-    
-    if (editingTransaction) {
-        // ACTUALIZAR EXISTENTE
-        await supabase.from('transactions').update({
-            name: newItem.name,
-            amount: parseFloat(newItem.amount),
-            type,
-            category: newItem.category,
-            date: new Date(newItem.date).toISOString(),
-            tags: newItem.tags
-        }).eq('id', editingTransaction.id);
-    } else {
-        // CREAR NUEVO
-        await supabase.from('transactions').insert([{ 
-            user_id: uid, 
-            name: newItem.name, 
-            amount: parseFloat(newItem.amount), 
-            type, 
-            category: newItem.category, 
-            date: new Date(newItem.date).toISOString(),
-            tags: newItem.tags 
-        }]);
-    }
-    
-    // Resetear formulario
-    setNewItem({ ...newItem, name: '', amount: '', tags: '' }); 
-    setEditingTransaction(null);
-    setShowForm(false); 
-    fetchTransactions(uid);
-  }
-
-  async function handleDelete(id: number) {
-    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-    if(confirm("¿Borrar?")) { await supabase.from('transactions').delete().eq('id', id); fetchTransactions(uid); }
-  }
-
-  async function handleAddSteam() {
-    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-    if(!uid) return;
-    await supabase.from('steam_portfolio').insert([{ user_id: uid, item_name: newSteamItem.name, quantity: parseInt(newSteamItem.quantity), current_price: parseFloat(newSteamItem.price) }]);
-    setShowSteamForm(false); fetchSteamPortfolio(uid);
-  }
-
-  async function handleDeleteSteam(id: number) {
-    const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id;
-    if(confirm("¿Borrar caja?")) { await supabase.from('steam_portfolio').delete().eq('id', id); fetchSteamPortfolio(uid); }
-  }
-
-  const generatePDF = () => {
-    let dataToExport = currentMonthTransactions;
-    let subtitle = "Informe Completo";
-
-    if (pdfSelectedTags.length > 0) {
-        dataToExport = currentMonthTransactions.filter(t => {
-            if (!t.tags) return false;
-            return pdfSelectedTags.some(tag => t.tags.includes(tag));
-        });
-        subtitle = `Filtrado por: ${pdfSelectedTags.join(', ')}`;
-    }
-
-    const pdfIncome = dataToExport.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-    const pdfExpenses = dataToExport.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-
-    const doc = new jsPDF();
-    const title = `Informe: ${currentMonthName} ${currentYear}`;
-    const dateStr = new Date().toLocaleString();
-
-    doc.setFontSize(18);
-    doc.text(title, 14, 20);
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(subtitle, 14, 26);
-    
-    doc.setTextColor(0);
-    doc.text(`Usuario: ${displayUserName}`, 14, 34); 
-    doc.text(`Generado: ${dateStr}`, 14, 39);
-
-    autoTable(doc, {
-      startY: 45,
-      head: [['Resumen del Reporte', 'Valor']],
-      body: [
-        ['Ingresos (Selección)', formatEuro(pdfIncome)],
-        ['Gastos (Selección)', formatEuro(pdfExpenses)],
-        ['Balance (Selección)', formatEuro(pdfIncome - pdfExpenses)],
-      ],
-      theme: 'striped',
-      headStyles: { fillColor: [22, 27, 34] }
-    });
-
-    doc.text("Movimientos Detallados", 14, (doc as any).lastAutoTable.finalY + 10);
-
-    autoTable(doc, {
-      startY: (doc as any).lastAutoTable.finalY + 15,
-      head: [['Fecha', 'Concepto', 'Etiquetas', 'Importe']],
-      body: dataToExport.map(t => [
-        new Date(t.date).toLocaleDateString('es-ES'),
-        t.name,
-        t.tags || '-',
-        formatEuro(t.amount)
-      ]),
-      headStyles: { fillColor: [16, 185, 129] }
-    });
-
-    doc.save(`Informe_${currentMonthName}_${currentYear}.pdf`);
-    setShowPdfModal(false);
-  };
-
-  const getUniqueTags = () => {
-    const allTags = currentMonthTransactions
-        .map(t => t.tags)
-        .filter(t => t && t.trim() !== '') 
-        .join(' ')
-        .split(' ')
-        .filter(t => t.startsWith('#')); 
-    return Array.from(new Set(allTags));
-  };
-
-  async function fetchSystemAlert() {
-    const { data } = await supabase.from('system_config').select('*').eq('key_name', 'global_alert').single();
-    if (data) { setSystemAlert({ message: data.value, active: data.is_active }); setAdminMessageInput(data.value); }
-  }
-
-  async function handleSaveAlert(active: boolean) {
-    await supabase.from('system_config').update({ value: adminMessageInput, is_active: active }).eq('key_name', 'global_alert');
-    fetchSystemAlert();
-  }
-
-  const runDiagnostics = async () => {
-    if (isDiagnosing) return;
-    setIsDiagnosing(true);
-    setDiagnosticLogs([]);
-    const addLog = (msg: string, status: 'info'|'success'|'error' = 'info') => setDiagnosticLogs(prev => [...prev, { msg, status }]);
-    
-    try {
-      addLog("Iniciando diagnóstico...", 'info');
-      await new Promise(r => setTimeout(r, 600));
-      const { data: { session: s } } = await supabase.auth.getSession();
-      if (s) addLog("Sesión activa OK", 'success');
-      else throw new Error("Sin sesión");
-      
-      addLog("Probando conexión DB...", 'info');
-      const { error } = await supabase.from('user_categories').select('id').limit(1);
-      if (!error) addLog("DB Conectada", 'success');
-      else addLog("Error DB", 'error');
-
-      addLog("Probando Steam API...", 'info');
-      const res = await fetch('/api/steam?name=Recoil%20Case');
-      if(res.ok) addLog("Steam API OK", 'success');
-      else addLog("Fallo Steam API", 'error');
-
-    } catch(e: any) {
-      addLog(e.message, 'error');
-    } finally {
-      setIsDiagnosing(false);
-    }
-  };
-
-  async function handleAuth() {
-    setLoading(true);
-    if (authMode === 'login') {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-           alert(error.message);
-      } else {
-          const { data: banned } = await supabase.rpc('am_i_banned');
-          if(banned) {
-              await supabase.auth.signOut();
-              alert("Esta cuenta está baneada por el administrador.");
-          }
-      }
-    } else {
-      const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
-      if (error) alert(error.message); else alert("Creado.");
-    }
-    setLoading(false);
-  }
-
+  async function fetchCategories(userId: string) { const { data } = await supabase.from('user_categories').select('*').eq('user_id', userId).order('created_at', { ascending: true }); if (data) { setCategories(data); if (data.length > 0 && !newItem.category) { setNewItem(prev => ({ ...prev, category: data[0].name })); setNewSchedule(prev => ({ ...prev, category: data[0].name })); } } }
+  async function fetchTransactions(userId?: string) { const uid = userId || (impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id); if(!uid) return; const { data } = await supabase.from('transactions').select('*').eq('user_id', uid).order('date', { ascending: false }); if (data) setAllTransactions(data); }
+  async function fetchSteamPortfolio(userId?: string) { const uid = userId || (impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id); if(!uid) return; const { data } = await supabase.from('steam_portfolio').select('*').eq('user_id', uid); if (data) setSteamItems(data); }
+  async function handleCreateCategory() { const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id; if (!newCatForm.name || !uid) return; await supabase.from('user_categories').insert([{ user_id: uid, name: newCatForm.name, color: newCatForm.color, is_income: newCatForm.is_income, budget_limit: parseFloat(newCatForm.budget_limit) || 0 }]); setNewCatForm({ name: '', color: '#3b82f6', is_income: false, budget_limit: '0' }); fetchCategories(uid); }
+  async function handleDeleteCategory(id: number, name: string) { const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id; if(confirm(`¿Borrar "${name}"?`)) { await supabase.from('user_categories').delete().eq('id', id); fetchCategories(uid); } }
+  async function handleUpdateLimit() { const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id; if (!editingLimit || !uid) return; await supabase.from('user_categories').update({ budget_limit: editingLimit.amount }).eq('id', editingLimit.id); setEditingLimit(null); fetchCategories(uid); }
+  const parseSteamPrice = (priceStr: string) => { let clean = priceStr.replace('€', '').replace('$', '').replace(',', '.').trim(); clean = clean.replace('--', '00').replace('-', '00'); return parseFloat(clean); };
+  async function getSteamPrice() { if(!newSteamItem.name) return; setFetchingPrice(true); try { const res = await fetch(`/api/steam?name=${encodeURIComponent(newSteamItem.name)}`); const data = await res.json(); const p = data.lowest_price || data.median_price; if (p) setNewSteamItem(prev => ({ ...prev, price: parseSteamPrice(p).toString() })); } catch (e) {} setFetchingPrice(false); }
+  async function refreshAllSteamPrices() { setRefreshingSteam(true); for (const item of steamItems) { const res = await fetch(`/api/steam?name=${encodeURIComponent(item.item_name)}`); const data = await res.json(); const p = data.lowest_price || data.median_price; if (p) await supabase.from('steam_portfolio').update({ current_price: parseSteamPrice(p) }).eq('id', item.id); } const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id; fetchSteamPortfolio(uid); setRefreshingSteam(false); }
+  const handleEditTransaction = (t: any) => { setEditingTransaction(t); setNewItem({ name: t.name, amount: t.amount, type: t.type, category: t.category, date: new Date(t.date).toISOString().split('T')[0], tags: t.tags || '' }); setShowForm(true); };
+  async function handleSaveTransaction() { const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id; if (!newItem.name || !newItem.amount || !uid) return; const selectedCat = categories.find(c => c.name === newItem.category); const type = selectedCat?.is_income ? 'income' : 'expense'; if (editingTransaction) { await supabase.from('transactions').update({ name: newItem.name, amount: parseFloat(newItem.amount), type, category: newItem.category, date: new Date(newItem.date).toISOString(), tags: newItem.tags }).eq('id', editingTransaction.id); } else { await supabase.from('transactions').insert([{ user_id: uid, name: newItem.name, amount: parseFloat(newItem.amount), type, category: newItem.category, date: new Date(newItem.date).toISOString(), tags: newItem.tags }]); } setNewItem({ ...newItem, name: '', amount: '', tags: '' }); setEditingTransaction(null); setShowForm(false); fetchTransactions(uid); }
+  async function handleDelete(id: number) { const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id; if(confirm("¿Borrar?")) { await supabase.from('transactions').delete().eq('id', id); fetchTransactions(uid); } }
+  async function handleAddSteam() { const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id; if(!uid) return; await supabase.from('steam_portfolio').insert([{ user_id: uid, item_name: newSteamItem.name, quantity: parseInt(newSteamItem.quantity), current_price: parseFloat(newSteamItem.price) }]); setShowSteamForm(false); fetchSteamPortfolio(uid); }
+  async function handleDeleteSteam(id: number) { const uid = impersonatingRef.current ? impersonatingRef.current.id : session?.user?.id; if(confirm("¿Borrar caja?")) { await supabase.from('steam_portfolio').delete().eq('id', id); fetchSteamPortfolio(uid); } }
+  const generatePDF = () => { let dataToExport = currentMonthTransactions; let subtitle = "Informe Completo"; if (pdfSelectedTags.length > 0) { dataToExport = currentMonthTransactions.filter(t => { if (!t.tags) return false; return pdfSelectedTags.some(tag => t.tags.includes(tag)); }); subtitle = `Filtrado por: ${pdfSelectedTags.join(', ')}`; } const pdfIncome = dataToExport.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0); const pdfExpenses = dataToExport.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0); const doc = new jsPDF(); const title = `Informe: ${currentMonthName} ${currentYear}`; const dateStr = new Date().toLocaleString(); doc.setFontSize(18); doc.text(title, 14, 20); doc.setFontSize(10); doc.setTextColor(100); doc.text(subtitle, 14, 26); doc.setTextColor(0); doc.text(`Usuario: ${displayUserName}`, 14, 34); doc.text(`Generado: ${dateStr}`, 14, 39); autoTable(doc, { startY: 45, head: [['Resumen del Reporte', 'Valor']], body: [ ['Ingresos (Selección)', formatEuro(pdfIncome)], ['Gastos (Selección)', formatEuro(pdfExpenses)], ['Balance (Selección)', formatEuro(pdfIncome - pdfExpenses)], ], theme: 'striped', headStyles: { fillColor: [22, 27, 34] } }); doc.text("Movimientos Detallados", 14, (doc as any).lastAutoTable.finalY + 10); autoTable(doc, { startY: (doc as any).lastAutoTable.finalY + 15, head: [['Fecha', 'Concepto', 'Etiquetas', 'Importe']], body: dataToExport.map(t => [ new Date(t.date).toLocaleDateString('es-ES'), t.name, t.tags || '-', formatEuro(t.amount) ]), headStyles: { fillColor: [16, 185, 129] } }); doc.save(`Informe_${currentMonthName}_${currentYear}.pdf`); setShowPdfModal(false); };
+  const getUniqueTags = () => { const allTags = currentMonthTransactions.map(t => t.tags).filter(t => t && t.trim() !== '').join(' ').split(' ').filter(t => t.startsWith('#')); return Array.from(new Set(allTags)); };
+  async function fetchSystemAlert() { const { data } = await supabase.from('system_config').select('*').eq('key_name', 'global_alert').single(); if (data) { setSystemAlert({ message: data.value, active: data.is_active }); setAdminMessageInput(data.value); } }
+  async function handleSaveAlert(active: boolean) { await supabase.from('system_config').update({ value: adminMessageInput, is_active: active }).eq('key_name', 'global_alert'); fetchSystemAlert(); }
+  const runDiagnostics = async () => { if (isDiagnosing) return; setIsDiagnosing(true); setDiagnosticLogs([]); const addLog = (msg: string, status: 'info'|'success'|'error' = 'info') => setDiagnosticLogs(prev => [...prev, { msg, status }]); try { addLog("Iniciando diagnóstico...", 'info'); await new Promise(r => setTimeout(r, 600)); const { data: { session: s } } = await supabase.auth.getSession(); if (s) addLog("Sesión activa OK", 'success'); else throw new Error("Sin sesión"); addLog("Probando conexión DB...", 'info'); const { error } = await supabase.from('user_categories').select('id').limit(1); if (!error) addLog("DB Conectada", 'success'); else addLog("Error DB", 'error'); addLog("Probando Steam API...", 'info'); const res = await fetch('/api/steam?name=Recoil%20Case'); if(res.ok) addLog("Steam API OK", 'success'); else addLog("Fallo Steam API", 'error'); } catch(e: any) { addLog(e.message, 'error'); } finally { setIsDiagnosing(false); } };
+  async function handleAuth() { setLoading(true); if (authMode === 'login') { const { data, error } = await supabase.auth.signInWithPassword({ email, password }); if (error) { alert(error.message); } else { const { data: banned } = await supabase.rpc('am_i_banned'); if(banned) { await supabase.auth.signOut(); alert("Esta cuenta está baneada por el administrador."); } } } else { const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } }); if (error) alert(error.message); else alert("Creado."); } setLoading(false); }
   const lastMonthDate = new Date(currentYear, currentMonthIndex - 1, 1);
-  const lastMonthExpenses = allTransactions.filter(t => {
-      const d = new Date(t.date);
-      return t.type === 'expense' && d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear();
-  }).reduce((acc, t) => acc + t.amount, 0);
-
+  const lastMonthExpenses = allTransactions.filter(t => { const d = new Date(t.date); return t.type === 'expense' && d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear(); }).reduce((acc, t) => acc + t.amount, 0);
   const comparisonData = [{ name: 'Mes Pasado', amount: lastMonthExpenses }, { name: 'Este Mes', amount: totalExpenses }];
-
   const blurClass = privacyMode ? 'blur-[10px] select-none transition-all' : 'transition-all';
   const isAdmin = session?.user?.app_metadata?.role === 'admin';
 
@@ -551,6 +336,46 @@ export default function Dashboard() {
                     </div>
                 </div>
              </div>
+          )}
+
+          {/* GESTOR PAGOS PROGRAMADOS (NUEVO) */}
+          {showScheduleModal && (
+              <div className="fixed inset-0 bg-black/80 z-[65] flex items-center justify-center p-4">
+                  <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-lg border border-slate-700">
+                      <div className="flex justify-between mb-4"><h3 className="font-bold text-xl flex items-center gap-2"><Clock/> Pagos Automáticos</h3><button onClick={() => setShowScheduleModal(false)}><X/></button></div>
+                      <p className="text-xs text-slate-400 mb-4">Estos pagos se añadirán automáticamente el día que elijas si inicias sesión ese día o después.</p>
+                      
+                      <div className="space-y-2 mb-6 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                          {scheduledPayments.map(pay => (
+                              <div key={pay.id} className="bg-[#0d1117] p-3 rounded border border-slate-800 flex justify-between items-center">
+                                  <div>
+                                      <p className="font-bold text-sm">{pay.name}</p>
+                                      <p className="text-[10px] text-slate-400">Día {pay.day_of_month} de cada mes • {pay.category}</p>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                      <span className="font-mono font-bold text-rose-400">{formatEuro(pay.amount)}</span>
+                                      <button onClick={() => handleDeleteSchedule(pay.id)} className="text-slate-600 hover:text-rose-500"><Trash2 size={16}/></button>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+
+                      <div className="bg-[#0f172a] p-4 rounded-lg border border-slate-700 space-y-3">
+                          <input className="w-full bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Nombre (ej: Netflix)" value={newSchedule.name} onChange={e => setNewSchedule({...newSchedule, name: e.target.value})}/>
+                          <div className="grid grid-cols-2 gap-2">
+                              <input type="number" className="bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" placeholder="Importe" value={newSchedule.amount} onChange={e => setNewSchedule({...newSchedule, amount: e.target.value})}/>
+                              <div className="flex items-center bg-[#1e293b] border border-slate-600 rounded px-2">
+                                  <span className="text-xs text-slate-400 mr-2">Día:</span>
+                                  <input type="number" min="1" max="31" className="bg-transparent w-full text-sm outline-none" value={newSchedule.day} onChange={e => setNewSchedule({...newSchedule, day: e.target.value})}/>
+                              </div>
+                          </div>
+                          <select className="w-full bg-[#1e293b] border border-slate-600 rounded p-2 text-sm" value={newSchedule.category} onChange={e => setNewSchedule({...newSchedule, category: e.target.value})}>
+                              {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                          </select>
+                          <button onClick={handleAddSchedule} className="w-full bg-sky-600 font-bold py-2 rounded text-sm hover:bg-sky-500">Programar Pago</button>
+                      </div>
+                  </div>
+              </div>
           )}
 
           {/* MODAL PDF CONFIG */}
@@ -697,6 +522,8 @@ export default function Dashboard() {
                     <div className="bg-slate-800 p-3 rounded-full"><User className={isAdmin ? "text-red-500" : "text-emerald-400"} size={24} /></div>
                     <div><p className="text-slate-400 text-xs">Bienvenido</p><h2 className="text-lg font-bold">{displayUserName}</h2></div>
                     <button onClick={() => setShowCatManager(true)} className="bg-slate-800 p-2 rounded-lg text-slate-300 border border-slate-700 flex gap-2 text-xs"><Tag size={14}/> Categorías</button>
+                    {/* BOTÓN NUEVO PAGOS PROGRAMADOS */}
+                    <button onClick={() => setShowScheduleModal(true)} className="bg-slate-800 p-2 rounded-lg text-slate-300 border border-slate-700 flex gap-2 text-xs"><Clock size={14}/> Automáticos</button>
                     <button onClick={() => setPrivacyMode(!privacyMode)} className="bg-slate-800 p-2 rounded-lg border border-slate-700 text-slate-300">{privacyMode ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
                 </div>
                 <div className="text-right hidden md:block"><p className="text-slate-400 text-xs">Patrimonio Total</p><h2 className={`text-2xl font-bold text-emerald-400 ${blurClass}`}>{formatEuro(netWorth)}</h2></div>
